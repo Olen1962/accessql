@@ -1,0 +1,2810 @@
+
+Cargo. toml
+"
+[package]
+name = "access_ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "x11"] }
+rfd = "0.15"
+"
+
+ - -scr/main.rs
+"
+mod tema;
+mod icones;
+mod widgets;
+mod dados_exemplo;
+mod estado;
+mod ribbon;
+mod navegacao;
+mod area_trabalho;
+mod status;
+mod backstage;
+mod menus;
+mod app;
+
+fn main() -> eframe::Result<()> {
+    let options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_inner_size([1366.0, 820.0])
+            .with_min_inner_size([1150.0, 600.0])
+            .with_title("Microsoft Access")
+            .with_app_id("msaccess-mock"),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Microsoft Access",
+        options,
+        Box::new(|cc| Ok(Box::new(estado::AccessApp::new(cc)))),
+    )
+}
+"
+
+ - - scr/app.rs
+"use eframe::egui;
+use crate::{backstage::*, estado::AccessApp, menus::*, navegacao::*, ribbon::*, area_trabalho::*, status::*};
+
+impl eframe::App for AccessApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.backstage = false;
+            self.dropdown = None;
+        }
+        self.qat(ctx);
+        self.tab_strip(ctx);
+        self.status_bar(ctx);
+        if self.backstage {
+            self.backstage_ui(ctx);
+        } else {
+            self.ribbon(ctx);
+            self.nav_pane(ctx);
+            self.workspace(ctx);
+        }
+        self.show_dropdown(ctx);
+    }
+}
+"
+
+ - - scr/area_trabalho.rs
+"
+use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use crate::{dados_exemplo::*, estado::*, icones::*, tema::*, widgets::*};
+
+impl AccessApp {
+// ───────────── Área de trabalho (documentos em separadores) ─────────────
+
+    pub(crate) fn workspace(&mut self, ctx: &egui::Context) {
+
+        egui::CentralPanel::default().frame(Frame::none().fill(WORK_BG)).show(ctx, |ui| {
+
+            if self.docs.is_empty() {
+
+                return;
+
+            }
+
+            self.active = self.active.min(self.docs.len() - 1);
+
+            let mut close: Option<usize> = None;
+
+            let mut switch: Option<usize> = None;
+
+            ui.horizontal(|ui| {
+
+                ui.spacing_mut().item_spacing = Vec2::new(1.0, 0.0);
+
+                ui.add_space(4.0);
+
+                for (i, d) in self.docs.iter().enumerate() {
+
+                    let sel = i == self.active;
+
+                    let w = tw(ui, &d.name, 12.5) + if sel { 52.0 } else { 36.0 };
+
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 24.0), Sense::click());
+
+                    let top = Rounding { nw: 3.0, ne: 3.0, sw: 0.0, se: 0.0 };
+
+                    let p = ui.painter().clone();
+
+                    if sel {
+
+                        p.rect_filled(rect, top, Color32::WHITE);
+
+                        p.rect_stroke(rect, top, Stroke::new(1.0, RIBBON_LINE));
+
+                    } else {
+
+                        p.rect_filled(rect.shrink2(Vec2::new(0.0, 2.0)), top, if resp.hovered() { rgb(0xE6EEF9) } else { rgb(0xD3DFF0) });
+
+                    }
+
+                    draw_icon(&p, Rect::from_center_size(Pos2::new(rect.left() + 14.0, rect.center().y), Vec2::splat(14.0)), d.kind.icon());
+
+                    p.text(Pos2::new(rect.left() + 26.0, rect.center().y), Align2::LEFT_CENTER, &d.name, FontId::proportional(12.5), Color32::BLACK);
+
+                    if sel {
+
+                        let cr = Rect::from_center_size(Pos2::new(rect.right() - 13.0, rect.center().y), Vec2::splat(14.0));
+
+                        let cresp = ui.interact(cr, ui.id().with(("close", i)), Sense::click());
+
+                        let col = if cresp.hovered() { ACCENT } else { rgb(0x6A7A94) };
+
+                        p.line_segment([cr.center() + Vec2::new(-3.5, -3.5), cr.center() + Vec2::new(3.5, 3.5)], Stroke::new(1.5, col));
+
+                        p.line_segment([cr.center() + Vec2::new(-3.5, 3.5), cr.center() + Vec2::new(3.5, -3.5)], Stroke::new(1.5, col));
+
+                        if cresp.clicked() {
+
+                            close = Some(i);
+
+                            continue;
+
+                        }
+
+                    }
+
+                    if resp.clicked() {
+
+                        switch = Some(i);
+
+                    }
+
+                }
+
+            });
+
+            if let Some(i) = close {
+
+                self.docs.remove(i);
+
+                self.active = self.active.saturating_sub(1);
+
+                return;
+
+            }
+
+            if let Some(i) = switch {
+
+                self.active = i;
+
+                self.sel = (0, 1);
+
+            }
+
+            let area = ui.available_rect_before_wrap();
+
+            ui.painter().rect_filled(area, 0.0, Color32::WHITE);
+
+            ui.painter().rect_stroke(area, 0.0, Stroke::new(1.0, RIBBON_LINE));
+
+            let kind = self.docs[self.active].kind;
+
+            let name = self.docs[self.active].name.clone();
+
+            match kind {
+
+                ObjKind::Table | ObjKind::Query => self.datasheet(ui, &name),
+
+                ObjKind::Form => self.form_view(ui, &name),
+
+                ObjKind::Report => self.report_view(ui, &name),
+
+            }
+
+        });
+
+    }
+
+
+
+    pub(crate) fn datasheet(&mut self, ui: &mut Ui, name: &str) {
+
+        let (cols, rows) = dataset(name);
+
+        let (rh, hh, sw) = (21.0_f32, 24.0_f32, 22.0_f32);
+
+        let extra = 150.0_f32;
+
+        let data_w = sw + cols.iter().map(|c| c.1).sum::<f32>() + extra;
+
+        self.sel.0 = self.sel.0.min(rows.len());
+
+        self.sel.1 = self.sel.1.min(cols.len() - 1);
+
+        let h = (ui.available_height() - 27.0).max(60.0);
+
+        egui::ScrollArea::both().auto_shrink([false, false]).max_height(h).show(ui, |ui| {
+
+            let width = data_w.max(ui.available_width());
+
+            let grid_bottom_rel = hh + rh * (rows.len() as f32 + 1.0);
+
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, grid_bottom_rel.max(h)), Sense::click());
+
+            let p = ui.painter().clone();
+
+            let o = rect.min;
+
+            let line = Stroke::new(1.0, GRID);
+
+            let gb = o.y + grid_bottom_rel;
+
+            p.rect_filled(rect, 0.0, Color32::WHITE);
+
+            // cabeçalho
+
+            p.rect_filled(Rect::from_min_size(o, Vec2::new(data_w, hh)), 0.0, rgb(0xF2F2F2));
+
+            p.rect_filled(Rect::from_min_size(o, Vec2::new(sw, gb - o.y)), 0.0, rgb(0xE9E9E9));
+
+            let mut x = o.x + sw;
+
+            for &(label, w) in &cols {
+
+                p.text(Pos2::new(x + 6.0, o.y + hh / 2.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), Color32::BLACK);
+
+                down_arrow(&p, Pos2::new(x + w - 11.0, o.y + hh / 2.0), rgb(0x6A6A6A));
+
+                x += w;
+
+                p.line_segment([Pos2::new(x, o.y), Pos2::new(x, gb)], line);
+
+            }
+
+            p.text(Pos2::new(x + 6.0, o.y + hh / 2.0), Align2::LEFT_CENTER, "Clique para Adicionar", FontId::proportional(13.0), rgb(0x5A7FB5));
+
+            down_arrow(&p, Pos2::new(x + extra - 11.0, o.y + hh / 2.0), rgb(0x5A7FB5));
+
+            p.line_segment([Pos2::new(o.x + sw, o.y), Pos2::new(o.x + sw, gb)], Stroke::new(1.0, rgb(0xB4B4B4)));
+
+            p.line_segment([Pos2::new(o.x, o.y + hh), Pos2::new(o.x + data_w, o.y + hh)], Stroke::new(1.0, rgb(0xB4B4B4)));
+
+            // linhas
+
+            for ri in 0..=rows.len() {
+
+                let y = o.y + hh + rh * ri as f32;
+
+                if ri == self.sel.0 {
+
+                    p.rect_filled(Rect::from_min_size(Pos2::new(o.x, y), Vec2::new(sw, rh)), 0.0, rgb(0xC9D7EA));
+
+                    tri(&p, [Pos2::new(o.x + 7.0, y + 5.0), Pos2::new(o.x + 7.0, y + rh - 5.0), Pos2::new(o.x + 14.0, y + rh / 2.0)], rgb(0x3A3A3A));
+
+                }
+
+                p.line_segment([Pos2::new(o.x, y + rh), Pos2::new(o.x + data_w, y + rh)], line);
+
+                if ri == rows.len() {
+
+                    p.text(Pos2::new(o.x + sw / 2.0, y + rh / 2.0 + 2.0), Align2::CENTER_CENTER, "*", FontId::proportional(14.0), rgb(0x555555));
+
+                    p.text(Pos2::new(o.x + sw + 6.0, y + rh / 2.0), Align2::LEFT_CENTER, "(Novo)", FontId::proportional(13.0), rgb(0x8A8A8A));
+
+                    continue;
+
+                }
+
+                let mut cx = o.x + sw;
+
+                for (ci, &(_, w)) in cols.iter().enumerate() {
+
+                    p.text(Pos2::new(cx + 6.0, y + rh / 2.0), Align2::LEFT_CENTER, rows[ri][ci], FontId::proportional(13.0), Color32::BLACK);
+
+                    cx += w;
+
+                }
+
+            }
+
+            // célula ativa
+
+            let mut cx = o.x + sw;
+
+            for (ci, &(_, w)) in cols.iter().enumerate() {
+
+                if ci == self.sel.1 {
+
+                    let y = o.y + hh + rh * self.sel.0 as f32;
+
+                    p.rect_stroke(Rect::from_min_size(Pos2::new(cx, y), Vec2::new(w, rh)).shrink(0.5), 0.0, Stroke::new(2.0, Color32::BLACK));
+
+                }
+
+                cx += w;
+
+            }
+
+            if resp.clicked() {
+
+                if let Some(pos) = resp.interact_pointer_pos() {
+
+                    let rel = pos - o;
+
+                    if rel.y > hh && rel.x > sw {
+
+                        let ri = ((rel.y - hh) / rh) as usize;
+
+                        if ri <= rows.len() {
+
+                            self.sel.0 = ri;
+
+                            let mut acc = sw;
+
+                            for (ci, &(_, w)) in cols.iter().enumerate() {
+
+                                if rel.x < acc + w {
+
+                                    self.sel.1 = ci;
+
+                                    break;
+
+                                }
+
+                                acc += w;
+
+                            }
+
+                        }
+
+                    }
+
+                }
+
+            }
+
+        });
+
+        self.record_bar(ui, rows.len());
+
+    }
+
+
+
+    pub(crate) fn record_bar(&mut self, ui: &mut Ui, total: usize) {
+
+        Frame::none().fill(rgb(0xF0F0F0)).inner_margin(Margin::symmetric(6.0, 3.0)).show(ui, |ui| {
+
+            ui.set_width(ui.available_width());
+
+            ui.horizontal(|ui| {
+
+                ui.spacing_mut().item_spacing.x = 2.0;
+
+                ui.label(RichText::new("Registo:").size(12.0));
+
+                if nav_arrow(ui, 0).clicked() {
+
+                    self.sel.0 = 0;
+
+                }
+
+                if nav_arrow(ui, 1).clicked() {
+
+                    self.sel.0 = self.sel.0.saturating_sub(1);
+
+                }
+
+                Frame::none()
+
+                    .fill(Color32::WHITE)
+
+                    .stroke(Stroke::new(1.0, rgb(0xA0A0A0)))
+
+                    .inner_margin(Margin::symmetric(8.0, 1.0))
+
+                    .show(ui, |ui| {
+
+                        ui.label(RichText::new(format!("{} de {}", self.sel.0.min(total - 1) + 1, total)).size(12.0));
+
+                    });
+
+                if nav_arrow(ui, 2).clicked() {
+
+                    self.sel.0 = (self.sel.0 + 1).min(total);
+
+                }
+
+                if nav_arrow(ui, 3).clicked() {
+
+                    self.sel.0 = total - 1;
+
+                }
+
+                if nav_arrow(ui, 4).clicked() {
+
+                    self.sel.0 = total;
+
+                }
+
+                ui.add_space(8.0);
+
+                Frame::none().stroke(Stroke::new(1.0, rgb(0xC0C0C0))).inner_margin(Margin::symmetric(8.0, 1.0)).show(ui, |ui| {
+
+                    ui.label(RichText::new("Sem Filtro").size(12.0).color(rgb(0x555555)));
+
+                });
+
+                ui.add_space(4.0);
+
+                ui.add(egui::TextEdit::singleline(&mut self.rec_search).hint_text("Procurar").desired_width(170.0));
+
+            });
+
+        });
+
+    }
+
+
+
+    pub(crate) fn form_view(&mut self, ui: &mut Ui, name: &str) {
+
+        let (cols, rows) = dataset(name);
+
+        let h = (ui.available_height() - 27.0).max(60.0);
+
+        egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(h).show(ui, |ui| {
+
+            Frame::none().fill(rgb(0xDCE6F4)).inner_margin(Margin::symmetric(16.0, 10.0)).show(ui, |ui| {
+
+                ui.set_width(ui.available_width());
+
+                ui.label(RichText::new(name).size(22.0).color(BLUE_TITLE));
+
+            });
+
+            let r = self.sel.0.min(rows.len() - 1);
+
+            Frame::none().inner_margin(Margin::same(24.0)).show(ui, |ui| {
+
+                egui::Grid::new("formgrid").num_columns(2).spacing([14.0, 10.0]).show(ui, |ui| {
+
+                    for (i, &(label, _)) in cols.iter().enumerate() {
+
+                        ui.label(RichText::new(label).size(13.0));
+
+                        let mut s = rows[r][i].to_string();
+
+                        ui.add(egui::TextEdit::singleline(&mut s).desired_width(260.0));
+
+                        ui.end_row();
+
+                    }
+
+                });
+
+            });
+
+        });
+
+        self.record_bar(ui, rows.len());
+
+    }
+
+
+
+    pub(crate) fn report_view(&self, ui: &mut Ui, name: &str) {
+
+        let (cols, rows) = dataset("Clientes");
+
+        let rect = ui.available_rect_before_wrap();
+
+        let p = ui.painter().clone();
+
+        p.rect_filled(rect, 0.0, rgb(0x8C98A8));
+
+        let pw = 600.0_f32.min(rect.width() - 40.0);
+
+        let page = Rect::from_min_size(Pos2::new(rect.center().x - pw / 2.0, rect.top() + 16.0), Vec2::new(pw, rect.height() - 32.0));
+
+        p.rect_filled(page.translate(Vec2::new(3.0, 3.0)), 0.0, rgb(0x6E7A8A));
+
+        p.rect_filled(page, 0.0, Color32::WHITE);
+
+        p.text(page.min + Vec2::new(30.0, 28.0), Align2::LEFT_TOP, name, FontId::proportional(22.0), BLUE_TITLE);
+
+        let n = cols.len().min(4);
+
+        let colw = (pw - 60.0) / n as f32;
+
+        let mut y = page.top() + 84.0;
+
+        for (ci, &(label, _)) in cols.iter().take(n).enumerate() {
+
+            p.text(Pos2::new(page.left() + 30.0 + colw * ci as f32, y), Align2::LEFT_TOP, label, FontId::proportional(13.0), BLUE_TITLE);
+
+        }
+
+        y += 22.0;
+
+        p.line_segment([Pos2::new(page.left() + 30.0, y), Pos2::new(page.right() - 30.0, y)], Stroke::new(1.5, BLUE_TITLE));
+
+        y += 6.0;
+
+        for row in &rows {
+
+            for ci in 0..n {
+
+                p.text(Pos2::new(page.left() + 30.0 + colw * ci as f32, y), Align2::LEFT_TOP, row[ci], FontId::proportional(12.5), Color32::BLACK);
+
+            }
+
+            y += 20.0;
+
+        }
+
+        ui.allocate_rect(rect, Sense::hover());
+
+    }
+
+}
+
+"
+
+-- scr/backstage.rs
+"
+use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use crate::{dados_exemplo::*, estado::*, icones::*, tema::*, widgets::*};
+
+impl AccessApp {
+// ───────────── Backstage (separador Ficheiro) ─────────────
+
+    pub(crate) fn bs_item(ui: &mut Ui, text: &str, selected: bool) -> Response {
+
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 29.0), Sense::click());
+
+        let p = ui.painter();
+
+        if selected {
+
+            p.rect_filled(rect, 0.0, rgb(0xFFE08A));
+
+        } else if resp.hovered() {
+
+            p.rect_filled(rect, 0.0, rgb(0xE3ECF8));
+
+        }
+
+        p.text(Pos2::new(rect.left() + 22.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(13.5), TEXT);
+
+        resp
+
+    }
+
+
+
+    pub(crate) fn bs_action(&mut self, ctx: &egui::Context, name: &str) {
+
+        match name {
+
+            "Abrir" => {
+
+                if let Some(path) = rfd::FileDialog::new()
+
+                    .add_filter("Bases de dados (accdb, sqlite, db)", &["accdb", "mdb", "sqlite", "sqlite3", "db"])
+
+                    .pick_file()
+
+                {
+
+                    self.db_path = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+
+                    self.msg = format!("Selecionado: {}", path.display());
+
+                    self.backstage = false;
+
+                }
+
+            }
+
+            "Sair" => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+
+            _ => self.msg = format!("«{}» – apenas apresentação visual", name),
+
+        }
+
+    }
+
+
+
+    pub(crate) fn backstage_ui(&mut self, ctx: &egui::Context) {
+
+        const ACTIONS: [&str; 5] = ["Guardar", "Guardar Objeto Como", "Guardar Base de Dados Como", "Abrir", "Fechar Base de Dados"];
+
+        const PAGES: [&str; 5] = ["Informações", "Recente", "Novo", "Imprimir", "Ajuda"];
+
+        egui::SidePanel::left("bs")
+
+            .exact_width(215.0)
+
+            .resizable(false)
+
+            .frame(Frame::none().fill(rgb(0xF4F7FB)))
+
+            .show(ctx, |ui| {
+
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+
+                ui.add_space(8.0);
+
+                let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::click());
+
+                let c = Pos2::new(r.left() + 32.0, r.center().y);
+
+                let p = ui.painter();
+
+                p.circle_filled(c, 13.0, if resp.hovered() { rgb(0x7FA6DE) } else { rgb(0x5B8BC9) });
+
+                let w = Stroke::new(2.0, Color32::WHITE);
+
+                p.line_segment([c + Vec2::new(6.0, 0.0), c + Vec2::new(-6.0, 0.0)], w);
+
+                p.line_segment([c + Vec2::new(-6.0, 0.0), c + Vec2::new(-1.0, -5.0)], w);
+
+                p.line_segment([c + Vec2::new(-6.0, 0.0), c + Vec2::new(-1.0, 5.0)], w);
+
+                if resp.clicked() {
+
+                    self.backstage = false;
+
+                }
+
+                ui.add_space(6.0);
+
+                for a in ACTIONS {
+
+                    if Self::bs_item(ui, a, false).clicked() {
+
+                        self.bs_action(ctx, a);
+
+                    }
+
+                }
+
+                ui.add_space(4.0);
+
+                let y = ui.cursor().top();
+
+                ui.painter().line_segment([Pos2::new(14.0, y), Pos2::new(200.0, y)], Stroke::new(1.0, RIBBON_LINE));
+
+                ui.add_space(4.0);
+
+                for (i, pg) in PAGES.iter().enumerate() {
+
+                    if Self::bs_item(ui, pg, self.bs_page == i).clicked() {
+
+                        self.bs_page = i;
+
+                    }
+
+                }
+
+                ui.add_space(4.0);
+
+                let y = ui.cursor().top();
+
+                ui.painter().line_segment([Pos2::new(14.0, y), Pos2::new(200.0, y)], Stroke::new(1.0, RIBBON_LINE));
+
+                ui.add_space(4.0);
+
+                for a in ["Opções", "Sair"] {
+
+                    if Self::bs_item(ui, a, false).clicked() {
+
+                        self.bs_action(ctx, a);
+
+                    }
+
+                }
+
+                let full = ui.max_rect();
+
+                ui.painter().line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0, RIBBON_LINE));
+
+            });
+
+
+
+        egui::CentralPanel::default().frame(Frame::none().fill(Color32::WHITE).inner_margin(Margin::same(28.0))).show(ctx, |ui| {
+
+            match self.bs_page {
+
+                0 => {
+
+                    ui.label(RichText::new(format!("Informações sobre {}", self.db_path)).size(22.0).color(BLUE_TITLE));
+
+                    ui.separator();
+
+                    ui.add_space(8.0);
+
+                    ui.horizontal_top(|ui| {
+
+                        ui.vertical(|ui| {
+
+                            if card(ui, Icon::Badge("C", C_GREEN), "Compactar e Reparar", "Ajuda a evitar e corrigir problemas no ficheiro da base de dados.").clicked() {
+
+                                self.msg = "«Compactar e Reparar» – apenas apresentação visual".into();
+
+                            }
+
+                            ui.add_space(6.0);
+
+                            card(ui, Icon::Badge("*", C_ORANGE), "Cifrar com Palavra-Passe", "Utilize uma palavra-passe para restringir o acesso à base de dados.");
+
+                        });
+
+                        ui.add_space(40.0);
+
+                        ui.vertical(|ui| {
+
+                            ui.label(RichText::new("Propriedades da Base de Dados").size(14.0).color(BLUE_TITLE));
+
+                            ui.add_space(6.0);
+
+                            egui::Grid::new("props").spacing([18.0, 6.0]).show(ui, |ui| {
+
+                                for (k, v) in [("Nome:", self.db_path.clone()), ("Tamanho:", "1,2 MB".into()), ("Motor de dados:", "SQLite (local)".into()), ("Estado:", "Apenas local, sem sincronização".into())] {
+
+                                    ui.label(RichText::new(k).color(rgb(0x5A6B85)));
+
+                                    ui.label(v);
+
+                                    ui.end_row();
+
+                                }
+
+                            });
+
+                        });
+
+                    });
+
+                }
+
+                1 => {
+
+                    ui.label(RichText::new("Bases de Dados Recentes").size(22.0).color(BLUE_TITLE));
+
+                    ui.separator();
+
+                    ui.add_space(8.0);
+
+                    for (n, path) in [
+
+                        ("Inventário.sqlite", "/home/utilizador/Documentos"),
+
+                        ("Clientes.accdb", "/home/utilizador/Documentos/Access"),
+
+                        ("Faturação.sqlite", "/home/utilizador/Trabalho"),
+
+                        ("Base de Dados1.accdb", "/home/utilizador"),
+
+                    ] {
+
+                        if card(ui, Icon::Table, n, path).clicked() {
+
+                            self.db_path = n.split('.').next().unwrap_or(n).to_string();
+
+                            self.backstage = false;
+
+                        }
+
+                    }
+
+                }
+
+                2 => {
+
+                    ui.label(RichText::new("Bases de Dados Disponíveis").size(22.0).color(BLUE_TITLE));
+
+                    ui.separator();
+
+                    ui.add_space(8.0);
+
+                    ui.horizontal_top(|ui| {
+
+                        ui.vertical(|ui| {
+
+                            card(ui, Icon::Table, "Base de Dados em Branco", "Criar uma base de dados local vazia.");
+
+                            ui.add_space(6.0);
+
+                            card(ui, Icon::Badge("M", C_BLUE), "Modelos Locais", "Modelos instalados neste computador.");
+
+                        });
+
+                        ui.add_space(40.0);
+
+                        ui.vertical(|ui| {
+
+                            ui.label(RichText::new("Base de Dados em Branco").size(16.0).color(BLUE_TITLE));
+
+                            ui.add_space(8.0);
+
+                            ui.label("Nome do ficheiro");
+
+                            ui.horizontal(|ui| {
+
+                                ui.add(egui::TextEdit::singleline(&mut self.new_db_name).desired_width(260.0));
+
+                                if ui.button("📁").on_hover_text("Escolher pasta...").clicked() {
+
+                                    if let Some(p) = rfd::FileDialog::new().set_file_name(self.new_db_name.as_str()).save_file() {
+
+                                        self.new_db_name = p.display().to_string();
+
+                                    }
+
+                                }
+
+                            });
+
+                            ui.add_space(10.0);
+
+                            if ui.add(egui::Button::new(RichText::new("Criar").size(14.0)).min_size(Vec2::new(90.0, 30.0))).clicked() {
+
+                                self.db_path = self.new_db_name.split('.').next().unwrap_or("Base de Dados1").to_string();
+
+                                self.msg = "«Criar» – apenas apresentação visual".into();
+
+                                self.backstage = false;
+
+                            }
+
+                        });
+
+                    });
+
+                }
+
+                p => {
+
+                    let t = ["", "", "", "Imprimir", "Ajuda"][p.min(4)];
+
+                    ui.label(RichText::new(t).size(22.0).color(BLUE_TITLE));
+
+                    ui.separator();
+
+                    ui.add_space(8.0);
+
+                    ui.label(RichText::new("Página ilustrativa – sem funcionalidade.").color(rgb(0x5A6B85)));
+
+                }
+
+            }
+
+        });
+
+    }
+
+}
+
+"
+
+- -  scr/dados_exemplos.rs
+
+use crate::tema::*;
+
+// ───────────────────────────── Dados de exemplo (em memória) ─────────────────────────────
+
+pub(crate) type Cols = Vec<(&'static str, f32)>;
+
+pub(crate) type Rows = Vec<Vec<&'static str>>;
+
+
+
+pub(crate) fn dataset(name: &str) -> (Cols, Rows) {
+
+    match name {
+
+        "Produtos" | "Produtos em Falta" => (
+
+            vec![("ID", 60.0), ("Produto", 210.0), ("Categoria", 130.0), ("Preço", 90.0), ("Stock", 80.0)],
+
+            vec![
+
+                vec!["1", "Caneta esferográfica", "Papelaria", "0,85 €", "420"],
+
+                vec!["2", "Caderno A4 pautado", "Papelaria", "2,40 €", "185"],
+
+                vec!["3", "Monitor 24\"", "Informática", "139,00 €", "12"],
+
+                vec!["4", "Teclado mecânico", "Informática", "59,90 €", "27"],
+
+                vec!["5", "Cadeira de escritório", "Mobiliário", "119,00 €", "9"],
+
+                vec!["6", "Candeeiro LED", "Mobiliário", "24,50 €", "64"],
+
+                vec!["7", "Pen USB 64 GB", "Informática", "9,99 €", "230"],
+
+            ],
+
+        ),
+
+        "Encomendas" | "Encomendas por Cliente" => (
+
+            vec![("ID", 60.0), ("Cliente", 160.0), ("Data", 100.0), ("Total", 100.0), ("Estado", 110.0)],
+
+            vec![
+
+                vec!["1001", "Ferreira & Filhos Lda", "2026-10-02", "312,40 €", "Enviada"],
+
+                vec!["1002", "Carvalho Têxteis", "2026-10-05", "1 280,00 €", "Paga"],
+
+                vec!["1003", "Mendes Consultores", "2026-10-11", "89,90 €", "Pendente"],
+
+                vec!["1004", "Santos Logística", "2026-10-19", "540,25 €", "Enviada"],
+
+                vec!["1005", "Costa Vinhos", "2026-10-27", "2 015,00 €", "Pendente"],
+
+                vec!["1006", "Lopes Editores", "2026-11-01", "76,00 €", "Paga"],
+
+            ],
+
+        ),
+
+        _ => (
+
+            vec![("ID", 60.0), ("Nome", 110.0), ("Apelido", 120.0), ("Empresa", 170.0), ("Cidade", 110.0), ("País", 90.0), ("Telefone", 120.0)],
+
+            vec![
+
+                vec!["1", "Ana", "Ferreira", "Ferreira & Filhos Lda", "Lisboa", "Portugal", "210 000 001"],
+
+                vec!["2", "Bruno", "Carvalho", "Carvalho Têxteis", "Porto", "Portugal", "220 000 002"],
+
+                vec!["3", "Carla", "Mendes", "Mendes Consultores", "Coimbra", "Portugal", "239 000 003"],
+
+                vec!["4", "Diogo", "Santos", "Santos Logística", "Braga", "Portugal", "253 000 004"],
+
+                vec!["5", "Eva", "Pereira", "Pereira Engenharia", "Faro", "Portugal", "289 000 005"],
+
+                vec!["6", "Fábio", "Costa", "Costa Vinhos", "Évora", "Portugal", "266 000 006"],
+
+                vec!["7", "Graça", "Lopes", "Lopes Editores", "Setúbal", "Portugal", "265 000 007"],
+
+                vec!["8", "Hugo", "Martins", "Martins Informática", "Aveiro", "Portugal", "234 000 008"],
+
+            ],
+
+        ),
+
+    }
+
+}
+
+
+
+pub(crate) fn dd_items(key: &str) -> &'static [&'static str] {
+
+    match key {
+
+        "vista" => &["Vista Folha de Dados", "Vista de Esquema", "Vista Estrutura"],
+
+        "colar" => &["Colar", "Colar Especial...", "Colar Acrescentar"],
+
+        "sel" => &["Igual a \"valor\"", "Diferente de \"valor\"", "Contém \"valor\"", "Não Contém \"valor\""],
+
+        "avanc" => &["Filtrar por Formulário", "Aplicar Filtro/Ordenação", "Limpar Todos os Filtros", "Filtro Avançado/Ordenação..."],
+
+        "mais_reg" => &["Altura da Linha...", "Largura da Coluna...", "Ocultar Campos", "Mostrar Campos..."],
+
+        "goto" => &["Primeiro", "Último", "Seguinte", "Anterior", "Novo"],
+
+        "selecionar" => &["Selecionar", "Selecionar Tudo"],
+
+        "navegacao" => &["Separadores Horizontais", "Separadores Verticais, Esquerda", "Separadores Verticais, Direita"],
+
+        "mais_forms" => &["Vários Itens", "Folha de Dados", "Formulário Dividido", "Caixa de Diálogo Modal"],
+
+        "modelos" => &["Contactos", "Tarefas", "Eventos", "Problemas"],
+
+        "partes" => &["Comentários", "Contactos", "Utilizadores", "Início Rápido"],
+
+        "imp_mais" => &["Ficheiro XML", "Documento HTML", "Pasta do Outlook", "Ficheiro dBASE"],
+
+        "exp_mais" => &["Word", "Ficheiro HTML", "Ficheiro dBASE", "Pasta do Outlook"],
+
+        "tipo" => &["Texto Curto", "Texto Longo", "Número", "Data/Hora", "Moeda", "Numeração Automática", "Sim/Não"],
+
+        "navcat" => &["Tipo de Objeto", "Tabelas e Vistas Relacionadas", "Data de Criação", "Data de Modificação", "Filtrar por Grupo"],
+
+        _ => &["(apenas apresentação visual)"],
+
+    }
+
+}
+
+"
+
+- - -scr/estado.rs
+
+"use eframe::egui::{self, Color32, FontId, Rect, Response, Stroke, Ui, Vec2};
+use crate::{icones::*, tema::*, widgets::*};
+
+// ───────────────────────────── Estado da aplicação ─────────────────────────────
+
+#[derive(Clone, Copy, PartialEq)]
+
+pub(crate) enum ObjKind {
+
+    Table,
+
+    Query,
+
+    Form,
+
+    Report,
+
+}
+
+impl ObjKind {
+
+    pub(crate) fn icon(self) -> Icon {
+
+        match self {
+
+            ObjKind::Table => Icon::Table,
+
+            ObjKind::Query => Icon::Query,
+
+            ObjKind::Form => Icon::Form,
+
+            ObjKind::Report => Icon::Report,
+
+        }
+
+    }
+
+}
+
+
+
+pub(crate) const OBJECTS: [(&str, ObjKind, &[&str]); 4] = [
+
+    ("Tabelas", ObjKind::Table, &["Clientes", "Encomendas", "Fornecedores", "Produtos"]),
+
+    ("Consultas", ObjKind::Query, &["Encomendas por Cliente", "Produtos em Falta"]),
+
+    ("Formulários", ObjKind::Form, &["Clientes", "Encomendas"]),
+
+    ("Relatórios", ObjKind::Report, &["Lista de Clientes", "Faturas"]),
+
+];
+
+
+
+pub(crate) struct Doc {
+
+    pub(crate) kind: ObjKind,
+
+    pub(crate) name: String,
+
+}
+
+
+
+pub(crate) struct AccessApp {
+
+    pub(crate) tab: usize,
+
+    pub(crate) tab_x: (f32, f32),
+
+    pub(crate) backstage: bool,
+
+    pub(crate) bs_page: usize,
+
+    pub(crate) nav_filter: String,
+
+    pub(crate) nav_open: [bool; 4],
+
+    pub(crate) nav_sel: Option<(usize, usize)>,
+
+    pub(crate) docs: Vec<Doc>,
+
+    pub(crate) active: usize,
+
+    pub(crate) sel: (usize, usize),
+
+    pub(crate) dropdown: Option<(&'static str, Rect)>,
+
+    pub(crate) rec_search: String,
+
+    pub(crate) new_db_name: String,
+
+    pub(crate) db_path: String,
+
+    pub(crate) msg: String,
+
+}
+
+
+
+impl AccessApp {
+
+    pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
+
+        let mut style = (*cc.egui_ctx.style()).clone();
+
+        style.visuals = egui::Visuals::light();
+
+        style.text_styles.insert(egui::TextStyle::Body, FontId::proportional(13.0));
+
+        style.text_styles.insert(egui::TextStyle::Button, FontId::proportional(13.0));
+
+        style.visuals.widgets.hovered.weak_bg_fill = HOVER_FILL;
+
+        style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, HOVER_LINE);
+
+        style.visuals.widgets.active.weak_bg_fill = PRESS_FILL;
+
+        style.visuals.selection.bg_fill = rgb(0xCFE0F7);
+
+        cc.egui_ctx.set_style(style);
+
+        Self {
+
+            tab: 0,
+
+            tab_x: (0.0, 0.0),
+
+            backstage: false,
+
+            bs_page: 0,
+
+            nav_filter: String::new(),
+
+            nav_open: [true; 4],
+
+            nav_sel: Some((0, 0)),
+
+            docs: vec![Doc { kind: ObjKind::Table, name: "Clientes".into() }],
+
+            active: 0,
+
+            sel: (0, 1),
+
+            dropdown: None,
+
+            rec_search: String::new(),
+
+            new_db_name: "Base de Dados1.accdb".into(),
+
+            db_path: "Base de Dados1".into(),
+
+            msg: String::new(),
+
+        }
+
+    }
+
+
+
+    pub(crate) fn act(&mut self, resp: &Response, label: &str, dd: Option<&'static str>) {
+
+        if resp.clicked() {
+
+            match dd {
+
+                Some(k) => {
+
+                    if matches!(self.dropdown, Some((kk, _)) if kk == k) {
+
+                        self.dropdown = None;
+
+                    } else {
+
+                        self.dropdown = Some((k, resp.rect));
+
+                    }
+
+                }
+
+                None => self.msg = format!("«{}» – apenas apresentação visual", label.replace('\n', " ")),
+
+            }
+
+        }
+
+    }
+
+
+
+    pub(crate) fn rb(&mut self, ui: &mut Ui, icon: Icon, label: &str, dd: Option<&'static str>) {
+
+        let r = big_btn(ui, icon, label, dd.is_some());
+
+        self.act(&r, label, dd);
+
+    }
+
+
+
+    pub(crate) fn stack(&mut self, ui: &mut Ui, items: &[(Icon, &str, Option<&'static str>)]) {
+
+        ui.vertical(|ui| {
+
+            ui.spacing_mut().item_spacing = Vec2::ZERO;
+
+            for (ic, l, dd) in items {
+
+                let r = small_btn(ui, *ic, l, dd.is_some());
+
+                self.act(&r, l, *dd);
+
+            }
+
+        });
+
+    }
+
+
+
+    pub(crate) fn open_doc(&mut self, kind: ObjKind, name: String) {
+
+        if let Some(i) = self.docs.iter().position(|d| d.kind == kind && d.name == name) {
+
+            self.active = i;
+
+        } else {
+
+            self.docs.push(Doc { kind, name });
+
+            self.active = self.docs.len() - 1;
+
+        }
+
+        self.sel = (0, 1);
+
+    }
+
+}
+"
+-- icons.rs
+
+"use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke, Vec2};
+use crate::tema::*;
+
+// ───────────────────────────── Ícones desenhados (sem imagens) ─────────────────────────────
+
+#[derive(Clone, Copy)]
+
+pub(crate) enum Icon {
+
+    Table,
+
+    Query,
+
+    Form,
+
+    Report,
+
+    Paste,
+
+    Filter,
+
+    Save,
+
+    Undo,
+
+    Redo,
+
+    Badge(&'static str, Color32),
+
+}
+
+
+
+pub(crate) fn tri(p: &egui::Painter, pts: [Pos2; 3], col: Color32) {
+
+    p.add(Shape::convex_polygon(pts.to_vec(), col, Stroke::NONE));
+
+}
+
+
+
+pub(crate) fn down_arrow(p: &egui::Painter, c: Pos2, col: Color32) {
+
+    tri(
+
+        p,
+
+        [
+
+            Pos2::new(c.x - 3.0, c.y - 1.5),
+
+            Pos2::new(c.x + 3.0, c.y - 1.5),
+
+            Pos2::new(c.x, c.y + 1.8),
+
+        ],
+
+        col,
+
+    );
+
+}
+
+
+
+pub(crate) fn draw_icon(p: &egui::Painter, r: Rect, icon: Icon) {
+
+    let s = r.width();
+
+    let line = Stroke::new(1.0, rgb(0x6B7F9E));
+
+    match icon {
+
+        Icon::Table | Icon::Query => {
+
+            let b = r.shrink(s * 0.08);
+
+            p.rect_filled(b, 1.0, Color32::WHITE);
+
+            let hc = if matches!(icon, Icon::Query) { rgb(0x5BA05B) } else { rgb(0x4F81BD) };
+
+            p.rect_filled(Rect::from_min_size(b.min, Vec2::new(b.width(), b.height() * 0.28)), 1.0, hc);
+
+            for i in 1..3 {
+
+                let y = b.top() + b.height() * (0.28 + 0.24 * i as f32);
+
+                p.line_segment([Pos2::new(b.left(), y), Pos2::new(b.right(), y)], line);
+
+            }
+
+            p.line_segment([Pos2::new(b.center().x, b.top()), Pos2::new(b.center().x, b.bottom())], line);
+
+            p.rect_stroke(b, 1.0, line);
+
+            if matches!(icon, Icon::Query) {
+
+                let c = Pos2::new(r.right() - s * 0.25, r.bottom() - s * 0.25);
+
+                p.circle_filled(c, s * 0.16, rgb(0xFFF3B0));
+
+                p.circle_stroke(c, s * 0.16, Stroke::new(1.5, rgb(0x7A5A00)));
+
+            }
+
+        }
+
+        Icon::Form => {
+
+            let b = r.shrink(s * 0.08);
+
+            p.rect_filled(b, 1.0, Color32::WHITE);
+
+            p.rect_filled(Rect::from_min_size(b.min, Vec2::new(b.width(), b.height() * 0.22)), 1.0, rgb(0xE0A040));
+
+            for i in 0..3 {
+
+                let y = b.top() + b.height() * (0.34 + 0.22 * i as f32);
+
+                p.line_segment([Pos2::new(b.left() + s * 0.08, y), Pos2::new(b.left() + s * 0.28, y)], line);
+
+                p.rect_stroke(
+
+                    Rect::from_min_max(Pos2::new(b.left() + s * 0.34, y - s * 0.06), Pos2::new(b.right() - s * 0.08, y + s * 0.06)),
+
+                    0.0,
+
+                    line,
+
+                );
+
+            }
+
+            p.rect_stroke(b, 1.0, line);
+
+        }
+
+        Icon::Report => {
+
+            let b = r.shrink2(Vec2::new(s * 0.18, s * 0.06));
+
+            p.rect_filled(b, 1.0, Color32::WHITE);
+
+            for i in 0..4 {
+
+                let y = b.top() + b.height() * (0.14 + 0.14 * i as f32);
+
+                p.line_segment([Pos2::new(b.left() + 3.0, y), Pos2::new(b.right() - 3.0, y)], line);
+
+            }
+
+            for i in 0..3 {
+
+                let x = b.left() + b.width() * (0.18 + 0.25 * i as f32);
+
+                let h = b.height() * (0.12 + 0.07 * i as f32);
+
+                p.rect_filled(Rect::from_min_max(Pos2::new(x, b.bottom() - 3.0 - h), Pos2::new(x + b.width() * 0.16, b.bottom() - 3.0)), 0.0, C_RED);
+
+            }
+
+            p.rect_stroke(b, 1.0, line);
+
+        }
+
+        Icon::Paste => {
+
+            let b = r.shrink2(Vec2::new(s * 0.12, s * 0.06));
+
+            p.rect_filled(b, 2.0, rgb(0xB07A3A));
+
+            p.rect_filled(Rect::from_center_size(Pos2::new(b.center().x, b.top() + 1.0), Vec2::new(b.width() * 0.45, s * 0.14)), 1.0, rgb(0x6E6E6E));
+
+            p.rect_filled(Rect::from_min_max(Pos2::new(b.left() + s * 0.1, b.top() + s * 0.22), Pos2::new(b.right() - s * 0.1, b.bottom() - s * 0.06)), 0.0, Color32::WHITE);
+
+        }
+
+        Icon::Filter => {
+
+            let c = r.center();
+
+            let col = rgb(0x3F7FC4);
+
+            tri(p, [Pos2::new(r.left() + s * 0.1, r.top() + s * 0.12), Pos2::new(r.right() - s * 0.1, r.top() + s * 0.12), Pos2::new(c.x, c.y + s * 0.12)], col);
+
+            p.rect_filled(Rect::from_min_max(Pos2::new(c.x - s * 0.08, c.y), Pos2::new(c.x + s * 0.08, r.bottom() - s * 0.1)), 0.0, col);
+
+        }
+
+        Icon::Save => {
+
+            let b = r.shrink(s * 0.1);
+
+            p.rect_filled(b, 2.0, rgb(0x2F5FA7));
+
+            p.rect_filled(Rect::from_min_max(Pos2::new(b.left() + s * 0.15, b.top()), Pos2::new(b.right() - s * 0.15, b.top() + b.height() * 0.4)), 0.0, Color32::WHITE);
+
+            p.rect_filled(Rect::from_min_max(Pos2::new(b.left() + s * 0.22, b.bottom() - b.height() * 0.38), Pos2::new(b.right() - s * 0.22, b.bottom())), 0.0, rgb(0x1B3C6E));
+
+        }
+
+        Icon::Undo | Icon::Redo => {
+
+            let flip = if matches!(icon, Icon::Redo) { -1.0 } else { 1.0 };
+
+            let c = r.center();
+
+            let rad = s * 0.32;
+
+            let pts: Vec<Pos2> = (0..=8)
+
+                .map(|i| {
+
+                    let a = std::f32::consts::PI * (1.0 - i as f32 / 8.0);
+
+                    Pos2::new(c.x + flip * rad * a.cos(), c.y + s * 0.1 - rad * a.sin())
+
+                })
+
+                .collect();
+
+            p.add(Shape::line(pts, Stroke::new(1.8, C_BLUE)));
+
+            let h = Pos2::new(c.x - flip * rad, c.y + s * 0.1);
+
+            tri(p, [Pos2::new(h.x - 3.0, h.y), Pos2::new(h.x + 3.0, h.y), Pos2::new(h.x, h.y + 4.5)], C_BLUE);
+
+        }
+
+        Icon::Badge(txt, col) => {
+
+            p.rect_filled(r.shrink(s * 0.06), s * 0.18, col);
+
+            p.text(r.center(), Align2::CENTER_CENTER, txt, FontId::proportional(s * 0.52), Color32::WHITE);
+
+        }
+
+    }
+
+}
+"
+
+-- scr/menus.rs
+"
+use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use crate::{dados_exemplo::*, estado::*, icones::*, tema::*, widgets::*};
+
+impl AccessApp {
+// ───────────── Menus pendentes (dropdowns do ribbon / painel) ─────────────
+
+    pub(crate) fn show_dropdown(&mut self, ctx: &egui::Context) {
+
+        let Some((key, btn)) = self.dropdown else { return };
+
+        let items = dd_items(key);
+
+        let mut picked: Option<&'static str> = None;
+
+        let area = egui::Area::new(egui::Id::new("dd_area"))
+
+            .order(egui::Order::Foreground)
+
+            .fixed_pos(btn.left_bottom() + Vec2::new(0.0, 1.0))
+
+            .show(ctx, |ui| {
+
+                Frame::popup(ui.style())
+
+                    .fill(Color32::WHITE)
+
+                    .stroke(Stroke::new(1.0, rgb(0x8FA9CF)))
+
+                    .inner_margin(Margin::same(2.0))
+
+                    .show(ui, |ui| {
+
+                        ui.set_min_width(200.0);
+
+                        ui.with_layout(Layout::top_down_justified(Align::LEFT), |ui| {
+
+                            for it in items {
+
+                                if ui.selectable_label(false, RichText::new(*it).size(12.5)).clicked() {
+
+                                    picked = Some(*it);
+
+                                }
+
+                            }
+
+                        });
+
+                    });
+
+            });
+
+        if let Some(it) = picked {
+
+            self.msg = format!("«{}» – apenas apresentação visual", it);
+
+            self.dropdown = None;
+
+            return;
+
+        }
+
+        if ctx.input(|i| i.pointer.any_pressed()) {
+
+            if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
+
+                if !area.response.rect.contains(pos) && !btn.contains(pos) {
+
+                    self.dropdown = None;
+
+                }
+
+            }
+
+        }
+
+    }
+
+}
+"
+
+-- scr/navegacao.rs
+"use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use crate::{dados_exemplo::*, estado::*, icones::*, tema::*, widgets::*};
+
+impl AccessApp {
+// ───────────── Painel de navegação ─────────────
+
+    pub(crate) fn nav_pane(&mut self, ctx: &egui::Context) {
+
+        let mut to_open: Option<(ObjKind, String)> = None;
+
+        egui::SidePanel::left("nav")
+
+            .resizable(true)
+
+            .default_width(230.0)
+
+            .width_range(170.0..=420.0)
+
+            .frame(Frame::none().fill(NAV_BG))
+
+            .show(ctx, |ui| {
+
+                let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 27.0), Sense::click());
+
+                let p = ui.painter().clone();
+
+                p.rect_filled(r, 0.0, NAV_HEAD);
+
+                p.text(Pos2::new(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, "Todos os Objetos do Access", FontId::proportional(13.0), TEXT);
+
+                down_arrow(&p, Pos2::new(r.right() - 14.0, r.center().y), TEXT);
+
+                self.act(&resp, "Categoria", Some("navcat"));
+
+
+
+                Frame::none().inner_margin(Margin::same(4.0)).show(ui, |ui| {
+
+                    let w = ui.available_width();
+
+                    ui.add(egui::TextEdit::singleline(&mut self.nav_filter).hint_text("Procurar...").desired_width(w));
+
+                });
+
+
+
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+
+                    for (gi, (gname, kind, items)) in OBJECTS.iter().enumerate() {
+
+                        let (hr, hresp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::click());
+
+                        let p = ui.painter().clone();
+
+                        p.rect_filled(hr, 0.0, if hresp.hovered() { rgb(0x8FADD8) } else { NAV_GROUP });
+
+                        let c = Pos2::new(hr.left() + 12.0, hr.center().y);
+
+                        if self.nav_open[gi] {
+
+                            tri(&p, [Pos2::new(c.x - 4.0, c.y - 2.0), Pos2::new(c.x + 4.0, c.y - 2.0), Pos2::new(c.x, c.y + 3.0)], Color32::WHITE);
+
+                        } else {
+
+                            tri(&p, [Pos2::new(c.x - 2.0, c.y - 4.0), Pos2::new(c.x - 2.0, c.y + 4.0), Pos2::new(c.x + 3.0, c.y)], Color32::WHITE);
+
+                        }
+
+                        p.text(Pos2::new(hr.left() + 24.0, hr.center().y), Align2::LEFT_CENTER, *gname, FontId::proportional(13.0), Color32::WHITE);
+
+                        if hresp.clicked() {
+
+                            self.nav_open[gi] = !self.nav_open[gi];
+
+                        }
+
+                        if !self.nav_open[gi] {
+
+                            continue;
+
+                        }
+
+                        for (ii, name) in items.iter().enumerate() {
+
+                            let f = self.nav_filter.to_lowercase();
+
+                            if !f.is_empty() && !name.to_lowercase().contains(&f) {
+
+                                continue;
+
+                            }
+
+                            let (rr, rresp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 21.0), Sense::click());
+
+                            let p = ui.painter().clone();
+
+                            if self.nav_sel == Some((gi, ii)) {
+
+                                p.rect_filled(rr.shrink2(Vec2::new(2.0, 0.0)), 2.0, rgb(0xFFE8A6));
+
+                                p.rect_stroke(rr.shrink2(Vec2::new(2.0, 0.0)), 2.0, Stroke::new(1.0, HOVER_LINE));
+
+                            } else if rresp.hovered() {
+
+                                p.rect_filled(rr.shrink2(Vec2::new(2.0, 0.0)), 2.0, rgb(0xE3ECF8));
+
+                            }
+
+                            draw_icon(&p, Rect::from_center_size(Pos2::new(rr.left() + 18.0, rr.center().y), Vec2::splat(16.0)), kind.icon());
+
+                            p.text(Pos2::new(rr.left() + 32.0, rr.center().y), Align2::LEFT_CENTER, *name, FontId::proportional(13.0), Color32::BLACK);
+
+                            if rresp.clicked() {
+
+                                self.nav_sel = Some((gi, ii));
+
+                            }
+
+                            if rresp.double_clicked() {
+
+                                to_open = Some((*kind, name.to_string()));
+
+                            }
+
+                            rresp.context_menu(|ui| {
+
+                                if ui.button("Abrir").clicked() {
+
+                                    to_open = Some((*kind, name.to_string()));
+
+                                    ui.close_menu();
+
+                                }
+
+                                for it in ["Vista Estrutura", "Importar", "Exportar", "Mudar o Nome", "Ocultar neste Grupo", "Eliminar", "Propriedades"] {
+
+                                    if ui.button(it).clicked() {
+
+                                        self.msg = format!("«{}» – apenas apresentação visual", it);
+
+                                        ui.close_menu();
+
+                                    }
+
+                                }
+
+                            });
+
+                        }
+
+                    }
+
+                });
+
+                let full = ui.max_rect();
+
+                ui.painter().line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0, RIBBON_LINE));
+
+            });
+
+        if let Some((k, n)) = to_open {
+
+            self.open_doc(k, n);
+
+        }
+
+    }
+
+}
+
+"
+
+-- scr/ribbon.rs
+"
+use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use crate::{dados_exemplo::*, estado::*, icones::*, tema::*, widgets::*};
+
+impl AccessApp {
+// ───────────── Barra de título / Acesso Rápido ─────────────
+
+    pub(crate) fn qat(&mut self, ctx: &egui::Context) {
+
+        egui::TopBottomPanel::top("qat")
+
+            .exact_height(26.0)
+
+            .frame(Frame::none().fill(TITLE_BG))
+
+            .show(ctx, |ui| {
+
+                let full = ui.max_rect();
+
+                ui.painter().text(
+
+                    full.center(),
+
+                    Align2::CENTER_CENTER,
+
+                    format!("{} : Base de Dados (Access 2007 - 2010) - Microsoft Access", self.db_path),
+
+                    FontId::proportional(12.5),
+
+                    TEXT,
+
+                );
+
+                ui.horizontal_centered(|ui| {
+
+                    ui.spacing_mut().item_spacing = Vec2::new(1.0, 0.0);
+
+                    ui.add_space(6.0);
+
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+
+                    draw_icon(ui.painter(), r, Icon::Badge("A", ACCENT));
+
+                    ui.add_space(6.0);
+
+                    for (ic, tip) in [(Icon::Save, "Guardar"), (Icon::Undo, "Anular"), (Icon::Redo, "Refazer")] {
+
+                        let r = small_btn(ui, ic, "", false).on_hover_text(tip);
+
+                        if r.clicked() {
+
+                            self.msg = format!("«{}» – apenas apresentação visual", tip);
+
+                        }
+
+                    }
+
+                });
+
+            });
+
+    }
+
+
+
+    // ───────────── Separadores do ribbon ─────────────
+
+    pub(crate) fn tab_strip(&mut self, ctx: &egui::Context) {
+
+        let is_table = self.docs.get(self.active).map_or(false, |d| d.kind == ObjKind::Table);
+
+        if self.tab == 4 && !is_table {
+
+            self.tab = 0;
+
+        }
+
+        egui::TopBottomPanel::top("tabs")
+
+            .exact_height(27.0)
+
+            .frame(Frame::none().fill(TAB_BG).inner_margin(Margin { left: 6.0, right: 6.0, top: 3.0, bottom: 0.0 }))
+
+            .show(ctx, |ui| {
+
+                ui.horizontal(|ui| {
+
+                    ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+
+                    if ribbon_tab(ui, "Ficheiro", self.backstage, TabStyle::File).clicked() {
+
+                        self.backstage = !self.backstage;
+
+                        self.dropdown = None;
+
+                    }
+
+                    let names = ["Base", "Criar", "Dados Externos", "Ferramentas de Bases de Dados", "Folha de Dados"];
+
+                    for (i, n) in names.iter().enumerate() {
+
+                        if i == 4 && !is_table {
+
+                            continue;
+
+                        }
+
+                        let sel = !self.backstage && self.tab == i;
+
+                        let r = ribbon_tab(ui, n, sel, if i == 4 { TabStyle::Context } else { TabStyle::Normal });
+
+                        if sel {
+
+                            self.tab_x = (r.rect.left(), r.rect.right());
+
+                        }
+
+                        if r.clicked() {
+
+                            self.tab = i;
+
+                            self.backstage = false;
+
+                            self.dropdown = None;
+
+                        }
+
+                    }
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+
+                        let (r, resp) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
+
+                        let p = ui.painter();
+
+                        p.circle_filled(r.center(), 8.0, if resp.hovered() { rgb(0x5B8BC9) } else { C_BLUE });
+
+                        p.text(r.center(), Align2::CENTER_CENTER, "?", FontId::proportional(12.0), Color32::WHITE);
+
+                        resp.on_hover_text("Ajuda do Microsoft Access (F1)");
+
+                    });
+
+                });
+
+            });
+
+    }
+
+
+
+    pub(crate) fn ribbon(&mut self, ctx: &egui::Context) {
+
+        egui::TopBottomPanel::top("ribbon")
+
+            .exact_height(96.0)
+
+            .frame(Frame::none().fill(RIBBON_BG).inner_margin(Margin { left: 6.0, right: 6.0, top: 4.0, bottom: 2.0 }))
+
+            .show(ctx, |ui| {
+
+                let full = ui.max_rect();
+
+                let st = Stroke::new(1.0, RIBBON_LINE);
+
+                let (a, b) = self.tab_x;
+
+                let y = full.top() + 0.5;
+
+                ui.painter().line_segment([Pos2::new(full.left(), y), Pos2::new(a + 1.0, y)], st);
+
+                ui.painter().line_segment([Pos2::new(b - 1.0, y), Pos2::new(full.right(), y)], st);
+
+                ui.painter().line_segment([Pos2::new(full.left(), full.bottom() - 0.5), Pos2::new(full.right(), full.bottom() - 0.5)], st);
+
+                ui.horizontal_top(|ui| match self.tab {
+
+                    0 => self.ribbon_base(ui),
+
+                    1 => self.ribbon_criar(ui),
+
+                    2 => self.ribbon_externos(ui),
+
+                    3 => self.ribbon_ferramentas(ui),
+
+                    _ => self.ribbon_folha(ui),
+
+                });
+
+            });
+
+    }
+
+
+
+    pub(crate) fn ribbon_base(&mut self, ui: &mut Ui) {
+
+        group(ui, "Vistas", |ui| self.rb(ui, Icon::Table, "Vista", Some("vista")));
+
+        group(ui, "Área de Transferência", |ui| {
+
+            self.rb(ui, Icon::Paste, "Colar", Some("colar"));
+
+            self.stack(ui, &[
+
+                (Icon::Badge("X", C_GRAY), "Cortar", None),
+
+                (Icon::Badge("C", C_BLUE), "Copiar", None),
+
+                (Icon::Badge("F", C_ORANGE), "Pincel de Formatos", None),
+
+            ]);
+
+        });
+
+        group(ui, "Ordenar e Filtrar", |ui| {
+
+            self.rb(ui, Icon::Filter, "Filtro", None);
+
+            self.stack(ui, &[
+
+                (Icon::Badge("A", C_BLUE), "Ascendente", None),
+
+                (Icon::Badge("Z", C_BLUE), "Descendente", None),
+
+                (Icon::Badge("x", C_RED), "Remover Ordenação", None),
+
+            ]);
+
+            self.stack(ui, &[
+
+                (Icon::Filter, "Seleção", Some("sel")),
+
+                (Icon::Filter, "Avançadas", Some("avanc")),
+
+                (Icon::Filter, "Alternar Filtro", None),
+
+            ]);
+
+        });
+
+        group(ui, "Registos", |ui| {
+
+            self.rb(ui, Icon::Badge("R", C_GREEN), "Atualizar\nTudo", Some("mais_reg"));
+
+            self.stack(ui, &[
+
+                (Icon::Badge("+", C_GREEN), "Novo", None),
+
+                (Icon::Save, "Guardar", None),
+
+                (Icon::Badge("x", C_RED), "Eliminar", None),
+
+            ]);
+
+            self.stack(ui, &[
+
+                (Icon::Badge("S", C_PURPLE), "Totais", None),
+
+                (Icon::Badge("O", C_BLUE), "Ortografia", None),
+
+                (Icon::Badge("…", C_GRAY), "Mais", Some("mais_reg")),
+
+            ]);
+
+        });
+
+        group(ui, "Localizar", |ui| {
+
+            self.rb(ui, Icon::Badge("L", C_BLUE), "Localizar", None);
+
+            self.stack(ui, &[
+
+                (Icon::Badge("S", C_ORANGE), "Substituir", None),
+
+                (Icon::Badge("→", C_GRAY), "Ir Para", Some("goto")),
+
+                (Icon::Badge("▢", C_GRAY), "Selecionar", Some("selecionar")),
+
+            ]);
+
+        });
+
+        group(ui, "Formatação de Texto", |ui| {
+
+            ui.vertical(|ui| {
+
+                ui.spacing_mut().item_spacing = Vec2::new(2.0, 4.0);
+
+                ui.horizontal(|ui| {
+
+                    faux_combo(ui, "Calibri", 110.0);
+
+                    faux_combo(ui, "11", 34.0);
+
+                });
+
+                ui.horizontal(|ui| {
+
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+
+                    for (t, c) in [("N", C_GRAY), ("I", C_GRAY), ("S", C_GRAY), ("A", C_RED), ("◧", C_ORANGE)] {
+
+                        let r = small_btn(ui, Icon::Badge(t, c), "", false);
+
+                        self.act(&r, "Formatação", None);
+
+                    }
+
+                });
+
+            });
+
+        });
+
+    }
+
+
+
+    pub(crate) fn ribbon_criar(&mut self, ui: &mut Ui) {
+
+        group(ui, "Modelos", |ui| self.rb(ui, Icon::Badge("P", C_PURPLE), "Partes da\nAplicação", Some("partes")));
+
+        group(ui, "Tabelas", |ui| {
+
+            self.rb(ui, Icon::Table, "Tabela", None);
+
+            self.rb(ui, Icon::Badge("M", C_BLUE), "Modelos de\nTabela", Some("modelos"));
+
+            self.rb(ui, Icon::Badge("E", C_GRAY), "Estrutura\nda Tabela", None);
+
+        });
+
+        group(ui, "Consultas", |ui| {
+
+            self.rb(ui, Icon::Query, "Assistente de\nConsultas", None);
+
+            self.rb(ui, Icon::Badge("E", C_GREEN), "Estrutura da\nConsulta", None);
+
+        });
+
+        group(ui, "Formulários", |ui| {
+
+            self.rb(ui, Icon::Form, "Formulário", None);
+
+            self.rb(ui, Icon::Badge("E", C_ORANGE), "Estrutura do\nFormulário", None);
+
+            self.rb(ui, Icon::Badge("B", C_GRAY), "Formulário\nem Branco", None);
+
+            self.stack(ui, &[
+
+                (Icon::Form, "Assistente de Formulários", None),
+
+                (Icon::Badge("N", C_BLUE), "Navegação", Some("navegacao")),
+
+                (Icon::Form, "Mais Formulários", Some("mais_forms")),
+
+            ]);
+
+        });
+
+        group(ui, "Relatórios", |ui| {
+
+            self.rb(ui, Icon::Report, "Relatório", None);
+
+            self.rb(ui, Icon::Badge("E", C_RED), "Estrutura do\nRelatório", None);
+
+            self.rb(ui, Icon::Badge("B", C_GRAY), "Relatório\nem Branco", None);
+
+            self.stack(ui, &[
+
+                (Icon::Report, "Assistente de Relatórios", None),
+
+                (Icon::Badge("Et", C_BLUE), "Etiquetas", None),
+
+            ]);
+
+        });
+
+        group(ui, "Macros e Código", |ui| {
+
+            self.rb(ui, Icon::Badge("M", C_ORANGE), "Macro", None);
+
+            self.stack(ui, &[
+
+                (Icon::Badge("M", C_BLUE), "Módulo", None),
+
+                (Icon::Badge("C", C_BLUE), "Módulo de Classe", None),
+
+                (Icon::Badge("V", C_PURPLE), "Visual Basic", None),
+
+            ]);
+
+        });
+
+    }
+
+
+
+    pub(crate) fn ribbon_externos(&mut self, ui: &mut Ui) {
+
+        group(ui, "Importar e Ligar", |ui| {
+
+            self.rb(ui, Icon::Badge("X", C_GREEN), "Folha de\nCálculo Excel", None);
+
+            self.rb(ui, Icon::Table, "Access", None);
+
+            self.rb(ui, Icon::Badge("S", C_BLUE), "Base de Dados\nSQLite", None);
+
+            self.rb(ui, Icon::Badge("D", C_GRAY), "Base de Dados\nODBC", None);
+
+            self.rb(ui, Icon::Badge("T", C_BLUE), "Ficheiro\nde Texto", None);
+
+            self.rb(ui, Icon::Badge("…", C_GRAY), "Mais", Some("imp_mais"));
+
+        });
+
+        group(ui, "Exportar", |ui| {
+
+            self.rb(ui, Icon::Badge("X", C_GREEN), "Excel", None);
+
+            self.rb(ui, Icon::Badge("T", C_BLUE), "Ficheiro\nde Texto", None);
+
+            self.rb(ui, Icon::Badge("<>", C_ORANGE), "XML", None);
+
+            self.rb(ui, Icon::Badge("P", C_RED), "PDF ou\nXPS", None);
+
+            self.rb(ui, Icon::Badge("@", C_BLUE), "Correio\nEletrónico", None);
+
+            self.rb(ui, Icon::Badge("…", C_GRAY), "Mais", Some("exp_mais"));
+
+        });
+
+    }
+
+
+
+    pub(crate) fn ribbon_ferramentas(&mut self, ui: &mut Ui) {
+
+        group(ui, "Ferramentas", |ui| {
+
+            self.rb(ui, Icon::Badge("C", C_GREEN), "Compactar e\nReparar", None);
+
+            self.rb(ui, Icon::Badge("M", C_ORANGE), "Executar\nMacro", None);
+
+        });
+
+        group(ui, "Relações", |ui| {
+
+            self.rb(ui, Icon::Badge("R", C_BLUE), "Relações", None);
+
+            self.stack(ui, &[(Icon::Badge("D", C_GRAY), "Dependências de Objetos", None)]);
+
+        });
+
+        group(ui, "Analisar", |ui| {
+
+            self.rb(ui, Icon::Report, "Documentador de\nBases de Dados", None);
+
+            self.stack(ui, &[
+
+                (Icon::Badge("A", C_PURPLE), "Analisar Desempenho", None),
+
+                (Icon::Table, "Analisar Tabela", None),
+
+            ]);
+
+        });
+
+        group(ui, "Mover Dados", |ui| {
+
+            self.rb(ui, Icon::Badge("S", C_BLUE), "Base de Dados\nSQLite", None);
+
+            self.rb(ui, Icon::Table, "Base de Dados\nAccess", None);
+
+        });
+
+    }
+
+
+
+    pub(crate) fn ribbon_folha(&mut self, ui: &mut Ui) {
+
+        group(ui, "Vistas", |ui| self.rb(ui, Icon::Table, "Vista", Some("vista")));
+
+        group(ui, "Campos e Colunas", |ui| {
+
+            self.rb(ui, Icon::Badge("+", C_GREEN), "Novo\nCampo", None);
+
+            self.rb(ui, Icon::Table, "Adicionar Campos\nExistentes", None);
+
+            self.stack(ui, &[
+
+                (Icon::Badge("I", C_BLUE), "Inserir", None),
+
+                (Icon::Badge("P", C_ORANGE), "Modificar Pesquisas", None),
+
+                (Icon::Badge("x", C_RED), "Eliminar", None),
+
+            ]);
+
+        });
+
+        group(ui, "Tipo de Dados e Formatação", |ui| {
+
+            ui.vertical(|ui| {
+
+                ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+
+                ui.horizontal(|ui| {
+
+                    ui.label(RichText::new("Tipo de Dados:").size(12.0).color(TEXT));
+
+                    faux_combo(ui, "Texto Curto", 100.0);
+
+                });
+
+                ui.horizontal(|ui| {
+
+                    ui.label(RichText::new("Formato:").size(12.0).color(TEXT));
+
+                    faux_combo(ui, "", 120.0);
+
+                });
+
+                ui.horizontal(|ui| {
+
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+
+                    for t in ["€", "%", ",", ".0", ".00"] {
+
+                        let r = small_btn(ui, Icon::Badge(t, C_GRAY), "", false);
+
+                        self.act(&r, "Formato", None);
+
+                    }
+
+                });
+
+            });
+
+        });
+
+        group(ui, "Validação de Campos", |ui| {
+
+            self.stack(ui, &[
+
+                (Icon::Badge("!", C_RED), "Obrigatório", None),
+
+                (Icon::Badge("1", C_BLUE), "Único", None),
+
+                (Icon::Badge("i", C_GREEN), "Indexado", None),
+
+            ]);
+
+        });
+
+    }
+
+}
+"
+
+- -scr/status.rs
+
+"use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use crate::{dados_exemplo::*, estado::*, icones::*, tema::*, widgets::*};
+
+impl AccessApp {
+// ───────────── Barra de estado ─────────────
+
+    pub(crate) fn status_bar(&mut self, ctx: &egui::Context) {
+
+        let view = if self.backstage {
+
+            "Pronto"
+
+        } else {
+
+            match self.docs.get(self.active).map(|d| d.kind) {
+
+                Some(ObjKind::Table) | Some(ObjKind::Query) => "Vista Folha de Dados",
+
+                Some(ObjKind::Form) => "Vista Formulário",
+
+                Some(ObjKind::Report) => "Pré-visualização",
+
+                None => "Pronto",
+
+            }
+
+        };
+
+        egui::TopBottomPanel::bottom("status")
+
+            .exact_height(23.0)
+
+            .frame(Frame::none().fill(STATUS_BG).inner_margin(Margin::symmetric(8.0, 0.0)))
+
+            .show(ctx, |ui| {
+
+                let full = ui.max_rect();
+
+                ui.painter().line_segment([full.left_top(), full.right_top()], Stroke::new(1.0, RIBBON_LINE));
+
+                ui.horizontal_centered(|ui| {
+
+                    ui.label(RichText::new(view).size(12.0).color(TEXT));
+
+                    ui.add_space(20.0);
+
+                    ui.label(RichText::new(&self.msg).size(11.5).color(rgb(0x5A6B85)));
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+
+                        small_btn(ui, Icon::Badge("E", C_GRAY), "", false).on_hover_text("Vista Estrutura");
+
+                        small_btn(ui, Icon::Table, "", false).on_hover_text("Vista Folha de Dados");
+
+                        ui.add_space(10.0);
+
+                        ui.label(RichText::new("Bloq Num").size(12.0).color(rgb(0x5A6B85)));
+
+                    });
+
+                });
+
+            });
+
+    }
+
+}
+"
+
+-- scr/tema.rs
+"
+use eframe::egui::Color32;
+
+// ───────────────────────────── Paleta Office 2010 (azul) + Access ─────────────────────────────
+
+pub(crate) const fn rgb(c: u32) -> Color32 {
+
+    Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
+
+}
+
+pub(crate) const ACCENT: Color32 = rgb(0xA4373A); // vermelho-Access (separador Ficheiro)
+
+pub(crate) const ACCENT_HOVER: Color32 = rgb(0xBB4A4D);
+
+pub(crate) const TITLE_BG: Color32 = rgb(0xC9DAF0);
+
+pub(crate) const TAB_BG: Color32 = rgb(0xD5E3F5);
+
+pub(crate) const RIBBON_BG: Color32 = rgb(0xEAF1FA);
+
+pub(crate) const RIBBON_LINE: Color32 = rgb(0x9CB7DC);
+
+pub(crate) const GROUP_SEP: Color32 = rgb(0xC3D3E9);
+
+pub(crate) const GROUP_TXT: Color32 = rgb(0x3E5C8A);
+
+pub(crate) const TEXT: Color32 = rgb(0x1E2F4A);
+
+pub(crate) const BLUE_TITLE: Color32 = rgb(0x1F3F73);
+
+pub(crate) const HOVER_FILL: Color32 = rgb(0xFFF1C2);
+
+pub(crate) const HOVER_LINE: Color32 = rgb(0xE8BE5F);
+
+pub(crate) const PRESS_FILL: Color32 = rgb(0xFFD58F);
+
+pub(crate) const NAV_BG: Color32 = rgb(0xF2F6FC);
+
+pub(crate) const NAV_HEAD: Color32 = rgb(0xB9CDE8);
+
+pub(crate) const NAV_GROUP: Color32 = rgb(0x7F9FCE);
+
+pub(crate) const WORK_BG: Color32 = rgb(0xBFCFE5);
+
+pub(crate) const STATUS_BG: Color32 = rgb(0xD5E3F5);
+
+pub(crate) const GRID: Color32 = rgb(0xD3D8E0);
+
+
+
+pub(crate) const C_BLUE: Color32 = rgb(0x3B6EB5);
+
+pub(crate) const C_GREEN: Color32 = rgb(0x4E9A4E);
+
+pub(crate) const C_RED: Color32 = rgb(0xC0504D);
+
+pub(crate) const C_ORANGE: Color32 = rgb(0xE08A2E);
+
+pub(crate) const C_GRAY: Color32 = rgb(0x7F8FA9);
+
+pub(crate) const C_PURPLE: Color32 = rgb(0x7B5EA7);
+
+"
+-- widgets.rs
+"
+use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use crate::{icones::*, tema::*};
+
+// ───────────────────────────── Widgets do ribbon ─────────────────────────────
+
+pub(crate) fn tw(ui: &Ui, text: &str, size: f32) -> f32 {
+
+    ui.painter()
+
+        .layout_no_wrap(text.to_string(), FontId::proportional(size), Color32::BLACK)
+
+        .size()
+
+        .x
+
+}
+
+
+
+pub(crate) fn hover_bg(p: &egui::Painter, resp: &Response, rect: Rect) {
+
+    if resp.is_pointer_button_down_on() {
+
+        p.rect_filled(rect, 3.0, PRESS_FILL);
+
+        p.rect_stroke(rect, 3.0, Stroke::new(1.0, HOVER_LINE));
+
+    } else if resp.hovered() {
+
+        p.rect_filled(rect, 3.0, HOVER_FILL);
+
+        p.rect_stroke(rect, 3.0, Stroke::new(1.0, HOVER_LINE));
+
+    }
+
+}
+
+
+
+pub(crate) fn big_btn(ui: &mut Ui, icon: Icon, label: &str, arrow: bool) -> Response {
+
+    let font = FontId::proportional(12.0);
+
+    let lines: Vec<&str> = label.split('\n').collect();
+
+    let tw_max = lines.iter().map(|l| tw(ui, l, 12.0)).fold(0.0_f32, f32::max);
+
+    let w = (tw_max + 14.0 + if arrow { 10.0 } else { 0.0 }).max(52.0);
+
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 66.0), Sense::click());
+
+    let p = ui.painter();
+
+    hover_bg(p, &resp, rect);
+
+    draw_icon(p, Rect::from_center_size(Pos2::new(rect.center().x, rect.top() + 21.0), Vec2::splat(32.0)), icon);
+
+    for (i, l) in lines.iter().enumerate() {
+
+        p.text(Pos2::new(rect.center().x, rect.top() + 41.0 + 12.0 * i as f32), Align2::CENTER_TOP, *l, font.clone(), TEXT);
+
+    }
+
+    if arrow {
+
+        let last = lines.last().copied().unwrap_or("");
+
+        let lw = tw(ui, last, 12.0);
+
+        let y = rect.top() + 47.0 + 12.0 * (lines.len() - 1) as f32;
+
+        down_arrow(ui.painter(), Pos2::new(rect.center().x + lw / 2.0 + 6.0, y), TEXT);
+
+    }
+
+    resp
+
+}
+
+
+
+pub(crate) fn small_btn(ui: &mut Ui, icon: Icon, label: &str, arrow: bool) -> Response {
+
+    let tw_ = if label.is_empty() { 0.0 } else { tw(ui, label, 12.0) + 6.0 };
+
+    let w = 24.0 + tw_ + if arrow { 12.0 } else { 2.0 };
+
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 22.0), Sense::click());
+
+    let p = ui.painter();
+
+    hover_bg(p, &resp, rect);
+
+    draw_icon(p, Rect::from_center_size(Pos2::new(rect.left() + 12.0, rect.center().y), Vec2::splat(16.0)), icon);
+
+    if !label.is_empty() {
+
+        p.text(Pos2::new(rect.left() + 24.0, rect.center().y), Align2::LEFT_CENTER, label, FontId::proportional(12.0), TEXT);
+
+    }
+
+    if arrow {
+
+        down_arrow(p, Pos2::new(rect.right() - 7.0, rect.center().y), TEXT);
+
+    }
+
+    resp
+
+}
+
+
+
+pub(crate) fn group(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
+
+    let inner = ui.vertical(|ui| {
+
+        ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+
+        ui.horizontal_top(|ui| {
+
+            ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+
+            add(ui);
+
+        });
+
+        let w = ui.min_rect().width().max(tw(ui, title, 11.5) + 8.0);
+
+        let (r, _) = ui.allocate_exact_size(Vec2::new(w, 16.0), Sense::hover());
+
+        ui.painter().text(r.center(), Align2::CENTER_CENTER, title, FontId::proportional(11.5), GROUP_TXT);
+
+    });
+
+    let r = inner.response.rect;
+
+    let x = r.right() + 3.0;
+
+    ui.painter().line_segment([Pos2::new(x, r.top() + 2.0), Pos2::new(x, r.bottom())], Stroke::new(1.0, GROUP_SEP));
+
+    ui.add_space(6.0);
+
+}
+
+
+
+pub(crate) fn faux_combo(ui: &mut Ui, text: &str, w: f32) {
+
+    Frame::none()
+
+        .fill(Color32::WHITE)
+
+        .stroke(Stroke::new(1.0, rgb(0xABC0DE)))
+
+        .inner_margin(Margin::symmetric(4.0, 1.0))
+
+        .show(ui, |ui| {
+
+            ui.set_width(w);
+
+            ui.horizontal(|ui| {
+
+                ui.label(RichText::new(text).size(12.0).color(TEXT));
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+
+                    down_arrow(ui.painter(), r.center(), TEXT);
+
+                });
+
+            });
+
+        });
+
+}
+
+
+
+#[derive(Clone, Copy)]
+
+pub(crate) enum TabStyle {
+
+    File,
+
+    Normal,
+
+    Context,
+
+}
+
+
+
+pub(crate) fn ribbon_tab(ui: &mut Ui, label: &str, selected: bool, style: TabStyle) -> Response {
+
+    let extra = if matches!(style, TabStyle::File) { 34.0 } else { 22.0 };
+
+    let w = tw(ui, label, 13.0) + extra;
+
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 24.0), Sense::click());
+
+    let p = ui.painter();
+
+    let top = Rounding { nw: 3.0, ne: 3.0, sw: 0.0, se: 0.0 };
+
+    let font = FontId::proportional(13.0);
+
+    if matches!(style, TabStyle::File) {
+
+        let fill = if selected || resp.hovered() { ACCENT_HOVER } else { ACCENT };
+
+        p.rect_filled(rect, top, fill);
+
+        p.text(rect.center(), Align2::CENTER_CENTER, label, font, Color32::WHITE);
+
+    } else {
+
+        if selected {
+
+            p.rect_filled(rect, top, RIBBON_BG);
+
+            p.rect_stroke(rect, top, Stroke::new(1.0, RIBBON_LINE));
+
+            p.line_segment(
+
+                [Pos2::new(rect.left() + 1.0, rect.bottom() - 0.5), Pos2::new(rect.right() - 1.0, rect.bottom() - 0.5)],
+
+                Stroke::new(1.5, RIBBON_BG),
+
+            );
+
+        } else if resp.hovered() {
+
+            p.rect_filled(rect, top, rgb(0xE6EEF9));
+
+        }
+
+        if matches!(style, TabStyle::Context) {
+
+            p.rect_filled(Rect::from_min_size(rect.min, Vec2::new(w, 3.0)), top, rgb(0xF2B84B));
+
+        }
+
+        p.text(rect.center() + Vec2::new(0.0, 1.0), Align2::CENTER_CENTER, label, font, TEXT);
+
+    }
+
+    resp
+
+}
+
+
+
+pub(crate) fn nav_arrow(ui: &mut Ui, kind: u8) -> Response {
+
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(22.0, 18.0), Sense::click());
+
+    let p = ui.painter();
+
+    if resp.hovered() {
+
+        p.rect_filled(rect, 2.0, rgb(0xDCE6F4));
+
+    }
+
+    let c = rect.center();
+
+    let col = rgb(0x4A5F80);
+
+    let h = 4.5;
+
+    let left = |cx: f32| tri(p, [Pos2::new(cx + 3.0, c.y - h), Pos2::new(cx + 3.0, c.y + h), Pos2::new(cx - 3.0, c.y)], col);
+
+    let right = |cx: f32| tri(p, [Pos2::new(cx - 3.0, c.y - h), Pos2::new(cx - 3.0, c.y + h), Pos2::new(cx + 3.0, c.y)], col);
+
+    let bar = |cx: f32| p.line_segment([Pos2::new(cx, c.y - h), Pos2::new(cx, c.y + h)], Stroke::new(1.5, col));
+
+    match kind {
+
+        0 => {
+
+            bar(c.x - 4.5);
+
+            left(c.x + 1.0);
+
+        }
+
+        1 => left(c.x),
+
+        2 => right(c.x),
+
+        3 => {
+
+            right(c.x - 1.0);
+
+            bar(c.x + 4.5);
+
+        }
+
+        _ => {
+
+            right(c.x - 4.0);
+
+            p.text(Pos2::new(c.x + 5.0, c.y + 1.0), Align2::CENTER_CENTER, "*", FontId::proportional(13.0), col);
+
+        }
+
+    }
+
+    resp
+
+}
+
+
+
+pub(crate) fn card(ui: &mut Ui, icon: Icon, title: &str, desc: &str) -> Response {
+
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(440.0, 62.0), Sense::click());
+
+    let p = ui.painter();
+
+    hover_bg(p, &resp, rect);
+
+    draw_icon(p, Rect::from_center_size(Pos2::new(rect.left() + 32.0, rect.center().y), Vec2::splat(38.0)), icon);
+
+    p.text(Pos2::new(rect.left() + 62.0, rect.top() + 12.0), Align2::LEFT_TOP, title, FontId::proportional(14.0), BLUE_TITLE);
+
+    p.text(Pos2::new(rect.left() + 62.0, rect.top() + 34.0), Align2::LEFT_TOP, desc, FontId::proportional(11.5), rgb(0x5A6B85));
+
+    resp
+
+}
+
+"
+
+
+ 
+

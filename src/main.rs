@@ -2,6 +2,7 @@ mod tema;
 mod icones;
 mod widgets;
 mod dados_exemplo;
+mod db;
 mod estado;
 mod ribbon;
 mod navegacao;
@@ -16,12 +17,12 @@ fn main() -> eframe::Result<()> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1366.0, 820.0])
             .with_min_inner_size([1150.0, 600.0])
-            .with_title("Microsoft Access")
-            .with_app_id("msaccess-mock"),
+            .with_title("AccesSQL")
+            .with_app_id("accessql"),
         ..Default::default()
     };
     eframe::run_native(
-        "Microsoft Access",
+        "AccesSQL",
         options,
         Box::new(|cc| Ok(Box::new(estado::AccessApp::new(cc)))),
     )
