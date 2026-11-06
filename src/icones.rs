@@ -67,7 +67,7 @@ pub(crate) fn draw_icon(p: &egui::Painter, r: Rect, icon: Icon) {
 
     let s = r.width();
 
-    let line = Stroke::new(1.0, rgb(0x6B7F9E));
+    let line = Stroke::new(1.0_f32, rgb(0x6B7F9E));
 
     match icon {
 
@@ -99,7 +99,7 @@ pub(crate) fn draw_icon(p: &egui::Painter, r: Rect, icon: Icon) {
 
                 p.circle_filled(c, s * 0.16, rgb(0xFFF3B0));
 
-                p.circle_stroke(c, s * 0.16, Stroke::new(1.5, rgb(0x7A5A00)));
+                p.circle_stroke(c, s * 0.16, Stroke::new(1.5_f32, rgb(0x7A5A00)));
 
             }
 
@@ -219,7 +219,7 @@ pub(crate) fn draw_icon(p: &egui::Painter, r: Rect, icon: Icon) {
 
                 .collect();
 
-            p.add(Shape::line(pts, Stroke::new(1.8, C_BLUE)));
+            p.add(Shape::line(pts, Stroke::new(1.8_f32, C_BLUE)));
 
             let h = Pos2::new(c.x - flip * rad, c.y + s * 0.1);
 

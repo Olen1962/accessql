@@ -21,7 +21,7 @@ impl AccessApp {
                     let p = ui.painter().clone();
                     if sel {
                         p.rect_filled(rect, top, Color32::WHITE);
-                        p.rect_stroke(rect, top, Stroke::new(1.0, RIBBON_LINE));
+                        p.rect_stroke(rect, top, Stroke::new(1.0_f32, RIBBON_LINE));
                     } else {
                         p.rect_filled(rect.shrink2(Vec2::new(0.0, 2.0)), top, if resp.hovered() { rgb(0xE6EEF9) } else { rgb(0xD3DFF0) });
                     }
@@ -31,8 +31,8 @@ impl AccessApp {
                         let cr = Rect::from_center_size(Pos2::new(rect.right() - 13.0, rect.center().y), Vec2::splat(14.0));
                         let cresp = ui.interact(cr, ui.id().with(("close", i)), Sense::click());
                         let col = if cresp.hovered() { ACCENT } else { rgb(0x6A7A94) };
-                        p.line_segment([cr.center() + Vec2::new(-3.5, -3.5), cr.center() + Vec2::new(3.5, 3.5)], Stroke::new(1.5, col));
-                        p.line_segment([cr.center() + Vec2::new(-3.5, 3.5), cr.center() + Vec2::new(3.5, -3.5)], Stroke::new(1.5, col));
+                        p.line_segment([cr.center() + Vec2::new(-3.5, -3.5), cr.center() + Vec2::new(3.5, 3.5)], Stroke::new(1.5_f32, col));
+                        p.line_segment([cr.center() + Vec2::new(-3.5, 3.5), cr.center() + Vec2::new(3.5, -3.5)], Stroke::new(1.5_f32, col));
                         if cresp.clicked() {
                             close = Some(i);
                             continue;
@@ -54,7 +54,7 @@ impl AccessApp {
             }
             let area = ui.available_rect_before_wrap();
             ui.painter().rect_filled(area, 0.0, Color32::WHITE);
-            ui.painter().rect_stroke(area, 0.0, Stroke::new(1.0, RIBBON_LINE));
+            ui.painter().rect_stroke(area, 0.0, Stroke::new(1.0_f32, RIBBON_LINE));
             let kind = self.docs[self.active].kind;
             let name = self.docs[self.active].name.clone();
             match kind {
@@ -77,7 +77,7 @@ impl AccessApp {
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, grid_bottom_rel.max(h)), Sense::click());
             let p = ui.painter().clone();
             let o = rect.min;
-            let line = Stroke::new(1.0, GRID);
+            let line = Stroke::new(1.0_f32, GRID);
             let gb = o.y + grid_bottom_rel;
             p.rect_filled(rect, 0.0, Color32::WHITE);
             // cabeçalho
@@ -93,8 +93,8 @@ impl AccessApp {
             }
             p.text(Pos2::new(x + 6.0, o.y + hh / 2.0), Align2::LEFT_CENTER, "Clique para Adicionar", FontId::proportional(13.0), rgb(0x5A7FB5));
             down_arrow(&p, Pos2::new(x + extra - 11.0, o.y + hh / 2.0), rgb(0x5A7FB5));
-            p.line_segment([Pos2::new(o.x + sw, o.y), Pos2::new(o.x + sw, gb)], Stroke::new(1.0, rgb(0xB4B4B4)));
-            p.line_segment([Pos2::new(o.x, o.y + hh), Pos2::new(o.x + data_w, o.y + hh)], Stroke::new(1.0, rgb(0xB4B4B4)));
+            p.line_segment([Pos2::new(o.x + sw, o.y), Pos2::new(o.x + sw, gb)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
+            p.line_segment([Pos2::new(o.x, o.y + hh), Pos2::new(o.x + data_w, o.y + hh)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
             // linhas
             for ri in 0..=rows.len() {
                 let y = o.y + hh + rh * ri as f32;
@@ -119,7 +119,7 @@ impl AccessApp {
             for (ci, &(_, w)) in cols.iter().enumerate() {
                 if ci == self.sel.1 {
                     let y = o.y + hh + rh * self.sel.0 as f32;
-                    p.rect_stroke(Rect::from_min_size(Pos2::new(cx, y), Vec2::new(w, rh)).shrink(0.5), 0.0, Stroke::new(2.0, Color32::BLACK));
+                    p.rect_stroke(Rect::from_min_size(Pos2::new(cx, y), Vec2::new(w, rh)).shrink(0.5), 0.0, Stroke::new(2.0_f32, Color32::BLACK));
                 }
                 cx += w;
             }
@@ -159,7 +159,7 @@ impl AccessApp {
                 }
                 Frame::none()
                     .fill(Color32::WHITE)
-                    .stroke(Stroke::new(1.0, rgb(0xA0A0A0)))
+                    .stroke(Stroke::new(1.0_f32, rgb(0xA0A0A0)))
                     .inner_margin(Margin::symmetric(8.0, 1.0))
                     .show(ui, |ui| {
                         ui.label(RichText::new(format!("{} de {}", if total == 0 { 0 } else { self.sel.0.min(total - 1) + 1 }, total)).size(12.0));
@@ -174,7 +174,7 @@ impl AccessApp {
                     self.sel.0 = total;
                 }
                 ui.add_space(8.0);
-                Frame::none().stroke(Stroke::new(1.0, rgb(0xC0C0C0))).inner_margin(Margin::symmetric(8.0, 1.0)).show(ui, |ui| {
+                Frame::none().stroke(Stroke::new(1.0_f32, rgb(0xC0C0C0))).inner_margin(Margin::symmetric(8.0, 1.0)).show(ui, |ui| {
                     ui.label(RichText::new("Sem Filtro").size(12.0).color(rgb(0x555555)));
                 });
                 ui.add_space(4.0);

@@ -52,7 +52,7 @@ impl AccessApp {
         style.text_styles.insert(egui::TextStyle::Body, FontId::proportional(13.0));
         style.text_styles.insert(egui::TextStyle::Button, FontId::proportional(13.0));
         style.visuals.widgets.hovered.weak_bg_fill = HOVER_FILL;
-        style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, HOVER_LINE);
+        style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, HOVER_LINE);
         style.visuals.widgets.active.weak_bg_fill = PRESS_FILL;
         style.visuals.selection.bg_fill = rgb(0xCFE0F7);
         cc.egui_ctx.set_style(style);

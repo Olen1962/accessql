@@ -54,7 +54,7 @@ impl AccessApp {
                             let p = ui.painter().clone();
                             if self.nav_sel == Some((gi, ii)) {
                                 p.rect_filled(rr.shrink2(Vec2::new(2.0, 0.0)), 2.0, rgb(0xFFE8A6));
-                                p.rect_stroke(rr.shrink2(Vec2::new(2.0, 0.0)), 2.0, Stroke::new(1.0, HOVER_LINE));
+                                p.rect_stroke(rr.shrink2(Vec2::new(2.0, 0.0)), 2.0, Stroke::new(1.0_f32, HOVER_LINE));
                             } else if rresp.hovered() {
                                 p.rect_filled(rr.shrink2(Vec2::new(2.0, 0.0)), 2.0, rgb(0xE3ECF8));
                             }
@@ -76,7 +76,7 @@ impl AccessApp {
                     }
                 });
                 let full = ui.max_rect();
-                ui.painter().line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0, RIBBON_LINE));
+                ui.painter().line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0_f32, RIBBON_LINE));
             });
         if let Some((k, n)) = to_open {
             self.open_doc(k, n);

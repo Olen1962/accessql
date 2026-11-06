@@ -90,7 +90,7 @@ impl AccessApp {
 
                 p.circle_filled(c, 13.0, if resp.hovered() { rgb(0x7FA6DE) } else { rgb(0x5B8BC9) });
 
-                let w = Stroke::new(2.0, Color32::WHITE);
+                let w = Stroke::new(2.0_f32, Color32::WHITE);
 
                 p.line_segment([c + Vec2::new(6.0, 0.0), c + Vec2::new(-6.0, 0.0)], w);
 
@@ -120,7 +120,7 @@ impl AccessApp {
 
                 let y = ui.cursor().top();
 
-                ui.painter().line_segment([Pos2::new(14.0, y), Pos2::new(200.0, y)], Stroke::new(1.0, RIBBON_LINE));
+                ui.painter().line_segment([Pos2::new(14.0, y), Pos2::new(200.0, y)], Stroke::new(1.0_f32, RIBBON_LINE));
 
                 ui.add_space(4.0);
 
@@ -138,7 +138,7 @@ impl AccessApp {
 
                 let y = ui.cursor().top();
 
-                ui.painter().line_segment([Pos2::new(14.0, y), Pos2::new(200.0, y)], Stroke::new(1.0, RIBBON_LINE));
+                ui.painter().line_segment([Pos2::new(14.0, y), Pos2::new(200.0, y)], Stroke::new(1.0_f32, RIBBON_LINE));
 
                 ui.add_space(4.0);
 
@@ -154,7 +154,7 @@ impl AccessApp {
 
                 let full = ui.max_rect();
 
-                ui.painter().line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0, RIBBON_LINE));
+                ui.painter().line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0_f32, RIBBON_LINE));
 
             });
 

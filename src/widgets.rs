@@ -23,13 +23,13 @@ pub(crate) fn hover_bg(p: &egui::Painter, resp: &Response, rect: Rect) {
 
         p.rect_filled(rect, 3.0, PRESS_FILL);
 
-        p.rect_stroke(rect, 3.0, Stroke::new(1.0, HOVER_LINE));
+        p.rect_stroke(rect, 3.0, Stroke::new(1.0_f32, HOVER_LINE));
 
     } else if resp.hovered() {
 
         p.rect_filled(rect, 3.0, HOVER_FILL);
 
-        p.rect_stroke(rect, 3.0, Stroke::new(1.0, HOVER_LINE));
+        p.rect_stroke(rect, 3.0, Stroke::new(1.0_f32, HOVER_LINE));
 
     }
 
@@ -137,7 +137,7 @@ pub(crate) fn group(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
 
     let x = r.right() + 3.0;
 
-    ui.painter().line_segment([Pos2::new(x, r.top() + 2.0), Pos2::new(x, r.bottom())], Stroke::new(1.0, GROUP_SEP));
+    ui.painter().line_segment([Pos2::new(x, r.top() + 2.0), Pos2::new(x, r.bottom())], Stroke::new(1.0_f32, GROUP_SEP));
 
     ui.add_space(6.0);
 
@@ -151,7 +151,7 @@ pub(crate) fn faux_combo(ui: &mut Ui, text: &str, w: f32) {
 
         .fill(Color32::WHITE)
 
-        .stroke(Stroke::new(1.0, rgb(0xABC0DE)))
+        .stroke(Stroke::new(1.0_f32, rgb(0xABC0DE)))
 
         .inner_margin(Margin::symmetric(4.0, 1.0))
 
@@ -221,13 +221,13 @@ pub(crate) fn ribbon_tab(ui: &mut Ui, label: &str, selected: bool, style: TabSty
 
             p.rect_filled(rect, top, RIBBON_BG);
 
-            p.rect_stroke(rect, top, Stroke::new(1.0, RIBBON_LINE));
+            p.rect_stroke(rect, top, Stroke::new(1.0_f32, RIBBON_LINE));
 
             p.line_segment(
 
                 [Pos2::new(rect.left() + 1.0, rect.bottom() - 0.5), Pos2::new(rect.right() - 1.0, rect.bottom() - 0.5)],
 
-                Stroke::new(1.5, RIBBON_BG),
+                Stroke::new(1.5_f32, RIBBON_BG),
 
             );
 
@@ -275,7 +275,7 @@ pub(crate) fn nav_arrow(ui: &mut Ui, kind: u8) -> Response {
 
     let right = |cx: f32| tri(p, [Pos2::new(cx - 3.0, c.y - h), Pos2::new(cx - 3.0, c.y + h), Pos2::new(cx + 3.0, c.y)], col);
 
-    let bar = |cx: f32| p.line_segment([Pos2::new(cx, c.y - h), Pos2::new(cx, c.y + h)], Stroke::new(1.5, col));
+    let bar = |cx: f32| p.line_segment([Pos2::new(cx, c.y - h), Pos2::new(cx, c.y + h)], Stroke::new(1.5_f32, col));
 
     match kind {
 

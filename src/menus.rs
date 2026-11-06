@@ -24,7 +24,7 @@ impl AccessApp {
 
                     .fill(Color32::WHITE)
 
-                    .stroke(Stroke::new(1.0, rgb(0x8FA9CF)))
+                    .stroke(Stroke::new(1.0_f32, rgb(0x8FA9CF)))
 
                     .inner_margin(Margin::same(2.0))
 

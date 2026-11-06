@@ -16,7 +16,7 @@ impl AccessApp {
             .frame(Frame::none().fill(STATUS_BG).inner_margin(Margin::symmetric(8.0, 0.0)))
             .show(ctx, |ui| {
                 let full = ui.max_rect();
-                ui.painter().line_segment([full.left_top(), full.right_top()], Stroke::new(1.0, RIBBON_LINE));
+                ui.painter().line_segment([full.left_top(), full.right_top()], Stroke::new(1.0_f32, RIBBON_LINE));
                 ui.horizontal_centered(|ui| {
                     ui.label(RichText::new(view).size(12.0).color(TEXT));
                     ui.add_space(20.0);

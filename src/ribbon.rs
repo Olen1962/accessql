@@ -78,7 +78,7 @@ impl AccessApp {
             .frame(Frame::none().fill(RIBBON_BG).inner_margin(Margin { left: 6.0, right: 6.0, top: 4.0, bottom: 2.0 }))
             .show(ctx, |ui| {
                 let full = ui.max_rect();
-                let st = Stroke::new(1.0, RIBBON_LINE);
+                let st = Stroke::new(1.0_f32, RIBBON_LINE);
                 let (a, b) = self.tab_x;
                 let y = full.top() + 0.5;
                 ui.painter().line_segment([Pos2::new(full.left(), y), Pos2::new(a + 1.0, y)], st);
