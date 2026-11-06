@@ -8,6 +8,7 @@ impl AccessApp {
         } else {
             match self.docs.get(self.active).map(|d| d.kind) {
                 Some(ObjKind::Table) | Some(ObjKind::Query) => "Vista Folha de Dados",
+                Some(ObjKind::Sql) => "Vista SQL",
                 None => "Pronto",
             }
         };

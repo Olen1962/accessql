@@ -4,6 +4,7 @@ mod widgets;
 mod dados_exemplo;
 mod db;
 mod ficheiro;
+mod consulta;
 mod recentes;
 mod estado;
 mod ribbon;

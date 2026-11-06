@@ -78,6 +78,7 @@ impl AccessApp {
             let name = self.docs[self.active].name.clone();
             match kind {
                 ObjKind::Table | ObjKind::Query => self.datasheet(ui, &name),
+                ObjKind::Sql => self.sql_view(ui),
             }
         });
     }
@@ -88,8 +89,11 @@ impl AccessApp {
         let extra = 150.0_f32;
         let ncols = data.cols.len();
         let nrows = data.rows.len();
+        // só as tabelas têm a linha «(Novo)»; consultas e resultados SQL são só de leitura
+        let novo = data.editable as usize;
+        let nlin = nrows + novo;
         let data_w = sw + data.cols.iter().map(|c| c.1).sum::<f32>() + extra;
-        self.sel.0 = self.sel.0.min(nrows);
+        self.sel.0 = self.sel.0.min(nlin.saturating_sub(1));
         self.sel.1 = self.sel.1.min(ncols.saturating_sub(1));
         let editable = data.editable && ncols > 0;
         let h = (ui.available_height() - 27.0).max(60.0);
@@ -97,7 +101,7 @@ impl AccessApp {
         // ── teclado (quando não se está a editar) ──
         let mut scroll_to_sel = std::mem::take(&mut self.scroll_sel);
         let digitando = ui.ctx().memory(|m| {
-            matches!(m.focused(), Some(id) if id == egui::Id::new("nav_filter") || id == egui::Id::new("rec_search"))
+            matches!(m.focused(), Some(id) if id == egui::Id::new("nav_filter") || id == egui::Id::new("rec_search") || id == egui::Id::new("sql_editor") || id == egui::Id::new("nome_consulta"))
         });
         if self.edit.is_some() {
             self.row_sel = false;
@@ -143,7 +147,7 @@ impl AccessApp {
             if navega {
                 let pagina = (((h - hh) / rh).floor().max(1.0)) as i32;
                 let (mut r, mut c) = (self.sel.0 as i32, self.sel.1 as i32);
-                let (ult_r, ult_c) = ((nrows as i32 - 1).max(0), ncols as i32 - 1);
+                let (ult_r, ult_c) = ((nlin as i32 - 1).max(0), ncols as i32 - 1);
                 if t.ctrl {
                     // Ctrl+setas: primeiro/último registo e campo; Ctrl+Home/End: cantos
                     if t.dy < 0 {
@@ -182,7 +186,7 @@ impl AccessApp {
                         r += pagina;
                     }
                 }
-                self.sel = (r.clamp(0, nrows as i32) as usize, c.clamp(0, ult_c) as usize);
+                self.sel = (r.clamp(0, ult_r) as usize, c.clamp(0, ult_c) as usize);
                 if t.dx != 0 || t.home || t.end {
                     self.row_sel = false;
                 }
@@ -219,7 +223,7 @@ impl AccessApp {
             let rows = &data.rows;
             egui::ScrollArea::both().auto_shrink([false, false]).max_height(h).show_viewport(ui, |ui, vp| {
                 let width = data_w.max(ui.available_width());
-                let grid_h = hh + rh * (nrows as f32 + 1.0);
+                let grid_h = hh + rh * nlin as f32;
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, grid_h.max(h)), Sense { click: true, drag: false, focusable: false });
                 let p = ui.painter().clone();
                 let o = rect.min;
@@ -236,7 +240,7 @@ impl AccessApp {
                 }
                 // só as linhas visíveis
                 let first = (((vp.min.y - hh) / rh).floor().max(0.0)) as usize;
-                let last = ((((vp.max.y - hh) / rh).ceil().max(0.0)) as usize + 1).min(nrows + 1);
+                let last = ((((vp.max.y - hh) / rh).ceil().max(0.0)) as usize + 1).min(nlin);
                 for ri in first..last {
                     let y = o.y + hh + rh * ri as f32;
                     if ri == sel.0 {
@@ -267,7 +271,7 @@ impl AccessApp {
                     }
                 }
                 // célula ativa
-                if ncols > 0 {
+                if ncols > 0 && nlin > 0 {
                     let cx = o.x + sw + cols.iter().take(sel.1).map(|c| c.1).sum::<f32>();
                     let cy = o.y + hh + rh * sel.0 as f32;
                     let cell = Rect::from_min_size(Pos2::new(cx, cy), Vec2::new(cols[sel.1].1, rh));
@@ -353,7 +357,7 @@ impl AccessApp {
                     }
                     let rel = pos - o;
                     let ri = ((rel.y - hh) / rh) as usize;
-                    if ri > nrows {
+                    if ri >= nlin {
                         return None;
                     }
                     if rel.x <= sw {
@@ -424,7 +428,7 @@ impl AccessApp {
             Some(2) => self.pedir_eliminar(),
             _ => {}
         }
-        self.record_bar(ui, total);
+        self.record_bar(ui, total, novo == 1);
     }
 
     /// Grava uma célula (UPDATE) ou cria um registo novo (INSERT) na linha `(Novo)`.
@@ -548,6 +552,9 @@ impl AccessApp {
         self.refresh_nav();
         let Some(doc) = self.docs.get(self.active) else { return };
         let (nome, kind) = (doc.name.clone(), doc.kind);
+        if kind == ObjKind::Sql {
+            return;
+        }
         match self.db.as_ref().map(|d| d.load(&nome, kind == ObjKind::Table)) {
             Some(Ok(d)) => {
                 self.docs[self.active].data = d;
@@ -558,7 +565,9 @@ impl AccessApp {
             None => {}
         }
     }
-    pub(crate) fn record_bar(&mut self, ui: &mut Ui, total: usize) {
+    pub(crate) fn record_bar(&mut self, ui: &mut Ui, total: usize, novo: bool) {
+        // última linha selecionável: a linha «(Novo)» só existe nas tabelas
+        let max = if novo { total } else { total.saturating_sub(1) };
         Frame::none().fill(rgb(0xF0F0F0)).inner_margin(Margin::symmetric(6.0, 3.0)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -578,12 +587,12 @@ impl AccessApp {
                         ui.label(RichText::new(format!("{} de {}", if total == 0 { 0 } else { self.sel.0.min(total - 1) + 1 }, total)).size(12.0));
                     });
                 if nav_arrow(ui, 2).clicked() {
-                    self.sel.0 = (self.sel.0 + 1).min(total);
+                    self.sel.0 = (self.sel.0 + 1).min(max);
                 }
                 if nav_arrow(ui, 3).clicked() {
                     self.sel.0 = total.saturating_sub(1);
                 }
-                if nav_arrow(ui, 4).clicked() {
+                if nav_arrow(ui, 4).clicked() && novo {
                     self.sel.0 = total;
                 }
                 ui.add_space(8.0);

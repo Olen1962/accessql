@@ -164,42 +164,15 @@ impl AccessApp {
         });
     }
     pub(crate) fn ribbon_criar(&mut self, ui: &mut Ui) {
-        group(ui, "Modelos", |ui| self.rb(ui, Icon::Badge("P", C_PURPLE), "Partes da\nAplicação", Some("partes")));
         group(ui, "Tabelas", |ui| {
-            self.rb(ui, Icon::Table, "Tabela", None);
-            self.rb(ui, Icon::Badge("M", C_BLUE), "Modelos de\nTabela", Some("modelos"));
-            self.rb(ui, Icon::Badge("E", C_GRAY), "Estrutura\nda Tabela", None);
+            if big_btn(ui, Icon::Table, "Tabela", false).clicked() {
+                self.nova_consulta_sql("CREATE TABLE nova_tabela (\n    id INTEGER PRIMARY KEY,\n    nome TEXT\n);");
+            }
         });
         group(ui, "Consultas", |ui| {
-            self.rb(ui, Icon::Query, "Assistente de\nConsultas", None);
-            self.rb(ui, Icon::Badge("E", C_GREEN), "Estrutura da\nConsulta", None);
-        });
-        group(ui, "Formulários", |ui| {
-            self.rb(ui, Icon::Form, "Formulário", None);
-            self.rb(ui, Icon::Badge("E", C_ORANGE), "Estrutura do\nFormulário", None);
-            self.rb(ui, Icon::Badge("B", C_GRAY), "Formulário\nem Branco", None);
-            self.stack(ui, &[
-                (Icon::Form, "Assistente de Formulários", None),
-                (Icon::Badge("N", C_BLUE), "Navegação", Some("navegacao")),
-                (Icon::Form, "Mais Formulários", Some("mais_forms")),
-            ]);
-        });
-        group(ui, "Relatórios", |ui| {
-            self.rb(ui, Icon::Report, "Relatório", None);
-            self.rb(ui, Icon::Badge("E", C_RED), "Estrutura do\nRelatório", None);
-            self.rb(ui, Icon::Badge("B", C_GRAY), "Relatório\nem Branco", None);
-            self.stack(ui, &[
-                (Icon::Report, "Assistente de Relatórios", None),
-                (Icon::Badge("Et", C_BLUE), "Etiquetas", None),
-            ]);
-        });
-        group(ui, "Macros e Código", |ui| {
-            self.rb(ui, Icon::Badge("M", C_ORANGE), "Macro", None);
-            self.stack(ui, &[
-                (Icon::Badge("M", C_BLUE), "Módulo", None),
-                (Icon::Badge("C", C_BLUE), "Módulo de Classe", None),
-                (Icon::Badge("V", C_PURPLE), "Visual Basic", None),
-            ]);
+            if big_btn(ui, Icon::Query, "Consulta\nSQL", false).clicked() {
+                self.nova_consulta_sql("SELECT * FROM ");
+            }
         });
     }
     pub(crate) fn ribbon_externos(&mut self, ui: &mut Ui) {

@@ -4,6 +4,7 @@ impl AccessApp {
 // ───────────── Painel de navegação ─────────────
     pub(crate) fn nav_pane(&mut self, ctx: &egui::Context) {
         let mut to_open: Option<(ObjKind, String)> = None;
+        let mut to_sql: Option<String> = None;
         egui::SidePanel::left("nav")
             .resizable(true)
             .default_width(230.0)
@@ -71,6 +72,10 @@ impl AccessApp {
                                     to_open = Some((kind, name.to_string()));
                                     ui.close_menu();
                                 }
+                                if kind == ObjKind::Query && ui.button("Vista SQL").clicked() {
+                                    to_sql = Some(name.to_string());
+                                    ui.close_menu();
+                                }
                             });
                         }
                     }
@@ -80,6 +85,9 @@ impl AccessApp {
             });
         if let Some((k, n)) = to_open {
             self.open_doc(k, n);
+        }
+        if let Some(n) = to_sql {
+            self.abrir_vista_sql(&n);
         }
     }
 }

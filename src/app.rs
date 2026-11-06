@@ -7,6 +7,7 @@ impl eframe::App for AccessApp {
             self.backstage = false;
             self.dropdown = None;
             self.confirm_del = None;
+            self.pedir_nome = None;
         }
         self.qat(ctx);
         self.tab_strip(ctx);
@@ -18,6 +19,7 @@ impl eframe::App for AccessApp {
             self.nav_pane(ctx);
             self.workspace(ctx);
             self.dialogo_eliminar(ctx);
+            self.dialogo_guardar_consulta(ctx);
         }
         self.show_dropdown(ctx);
     }

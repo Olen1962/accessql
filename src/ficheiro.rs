@@ -22,6 +22,8 @@ impl AccessApp {
         self.sel = (0, 1);
         self.edit = None;
         self.confirm_del = None;
+        self.pedir_nome = None;
+        self.n_consulta = 0;
         self.refresh_nav();
         if let Some(f) = ficheiro {
             recentes::adicionar(&mut self.recentes, f);
@@ -131,6 +133,8 @@ impl AccessApp {
         self.active = 0;
         self.edit = None;
         self.confirm_del = None;
+        self.pedir_nome = None;
+        self.n_consulta = 0;
         self.refresh_nav();
         self.msg = "Base de dados fechada".into();
     }

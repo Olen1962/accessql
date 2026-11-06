@@ -6,12 +6,14 @@ use crate::{db::{Database, TableData}, icones::*, tema::*, widgets::*};
 pub(crate) enum ObjKind {
     Table,
     Query,
+    Sql,
 }
 impl ObjKind {
     pub(crate) fn icon(self) -> Icon {
         match self {
             ObjKind::Table => Icon::Table,
             ObjKind::Query => Icon::Query,
+            ObjKind::Sql => Icon::Badge("S", C_BLUE),
         }
     }
 }
@@ -25,6 +27,13 @@ pub(crate) struct Doc {
     pub(crate) kind: ObjKind,
     pub(crate) name: String,
     pub(crate) data: TableData,
+    /// Texto SQL (só nos separadores de consulta).
+    pub(crate) sql: String,
+    /// Mensagem sob o editor SQL (resultado ou erro).
+    pub(crate) info: String,
+    pub(crate) info_erro: bool,
+    /// Nome da consulta guardada (VIEW) a que este separador corresponde.
+    pub(crate) vista: Option<String>,
 }
 
 /// Célula da folha de dados que está a ser editada.
@@ -59,6 +68,8 @@ pub(crate) struct AccessApp {
     pub(crate) scroll_sel: bool,
     pub(crate) confirm_del: Option<usize>,
     pub(crate) row_sel: bool,
+    pub(crate) pedir_nome: Option<String>,
+    pub(crate) n_consulta: usize,
 }
 impl AccessApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -98,6 +109,8 @@ impl AccessApp {
             scroll_sel: false,
             confirm_del: None,
             row_sel: false,
+            pedir_nome: None,
+            n_consulta: 0,
         };
         app.refresh_nav();
         app
@@ -157,7 +170,7 @@ impl AccessApp {
                     return;
                 }
             };
-            self.docs.push(Doc { kind, name, data });
+            self.docs.push(Doc { kind, name, data, sql: String::new(), info: String::new(), info_erro: false, vista: None });
             self.active = self.docs.len() - 1;
         }
         self.sel = (0, 1);

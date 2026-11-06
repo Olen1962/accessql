@@ -27,6 +27,7 @@
 - Rust edition 2021. `eframe = 0.29` (`default-features = false`, features `default_fonts`, `glow`, `x11`). `rfd = 0.15` para diálogos de ficheiros.
 - `rusqlite = { version = "0.32", features = ["bundled"] }` (já no `Cargo.toml`).
 - FreeBSD: `sed -i ''` (aspas vazias a seguir ao `-i`).
+- Depois de cada `unzip` fazer **`touch src/*.rs`** antes do `cargo run`: se os relógios do Claude e do utilizador não coincidirem, o `cargo` julga os ficheiros antigos e não recompila (confirmar que aparece «Compiling accessql»).
 - Grelha e ribbon são **desenhados à mão** com `painter` (não usar `egui_extras`).
 - `.gitignore` tem de incluir `target/` (o binário passa dos 100 MB e o GitHub rejeita o push).
 - Pacote já renomeado para `accessql`.
@@ -43,6 +44,7 @@
 | `area_trabalho.rs` | Separadores de documentos e folha de dados (edição, `(Novo)`, eliminar, atualizar, linhas visíveis) |
 | `backstage.rs` | Separador Ficheiro: Informações, Recente, Novo; ações Abrir, Guardar Cópia Como, Fechar, Sair |
 | `db.rs` | Camada SQLite (`Database`, `TableData`): open/create/demo, catálogo, load, update/insert/delete, `VACUUM INTO`, compactar |
+| `consulta.rs` | Vista SQL: editor, executar (F5/Ctrl+Enter), resultados, guardar como `VIEW`, abrir `VIEW` para editar |
 | `ficheiro.rs` | Novo, abrir, guardar cópia, fechar, compactar (métodos de `AccessApp`) |
 | `recentes.rs` | Lista de recentes em `~/.config/accessql/recentes.txt` |
 | `menus.rs` | Menus pendentes |
@@ -60,6 +62,7 @@
 - Objetos do painel de navegação: **Tabelas** e **Consultas**. As consultas guardadas são **`VIEW`s** do SQLite.
 - **Formulários e Relatórios ficam fora** da primeira versão (remover `Form`/`Report` de `ObjKind` e as vistas `form_view`/`report_view`).
 - Vistas: Folha de Dados, Estrutura, **SQL** (editor + resultados).
+- Vista SQL: um separador por consulta («Consulta1», …). Scripts com várias instruções são executados em sequência (sem transação própria); mostra-se o resultado da última que devolve linhas (máx. 100000). «Guardar como Consulta» cria uma `VIEW` (só `SELECT`); se o separador já veio de uma consulta guardada, substitui-a sem perguntar. Consultas e resultados SQL não têm linha `(Novo)` e não são editáveis.
 - Folha de dados: clicar no seletor de registo (coluna esquerda) seleciona o registo; Delete elimina (com confirmação). Com uma célula selecionada, Delete limpa-a, Backspace ou F2/Enter/escrever editam. Ctrl+setas = primeiro/último registo e campo.
 - Ao arrancar não há base de dados aberta e o backstage abre em «Recente» (ou «Novo», se não houver recentes).
 - Recentes em `~/.config/accessql/recentes.txt` (máx. 10). Abrir recusa ficheiros que não sejam SQLite.
@@ -110,10 +113,11 @@ Em aberto:
 - [x] Passo 1: `db.rs` + `rusqlite`, navegação ligada ao catálogo, folha de dados a ler (testado, tag `passo1`).
 - [x] Passo 2: edição de células, `(Novo)`, Eliminar com confirmação, Atualizar, linhas visíveis (testado, tag `passo2`).
 - [x] Passo 3: Ficheiro → Novo / Abrir / Guardar Cópia Como / Fechar / Recentes / Compactar (compilado e testado: criar, abrir, guardar cópia, erros, persistência).
-- [~] Passo 3b (ajustes após testes): seletor de registo, Delete, menu de contexto, teclado da grelha, Compactar no ribbon: escrito, **por compilar**.
-- [ ] Passos 4 a 7 (secção 9). Antes do 4: ordenar, filtrar e procurar na folha de dados (`ORDER BY` / `WHERE`).
+- [x] Passo 3b: seletor de registo, Delete, menu de contexto, teclado da grelha, Compactar no ribbon (testado; tag `passo3` no GitHub).
+- [~] Passo 4: Vista SQL (Criar → Consulta SQL / Tabela com modelo; executar scripts; resultados só de leitura; Guardar como Consulta = `VIEW`; menu de contexto «Vista SQL» nas consultas): escrito, **por compilar**.
+- [ ] Passos 5 a 7 (secção 9). Também por fazer: ordenar, filtrar e procurar na folha de dados (`ORDER BY` / `WHERE`).
 
-**Próximo passo:** `cargo check` com o pacote 3b. Testar: clicar no seletor de registo (coluna à esquerda) e eliminar com Delete, com o menu de contexto e com Registos → Eliminar; Delete e Backspace numa célula selecionada; Ctrl+setas, Home/End, PgUp/PgDn. **Pendente de esclarecer:** na caixa de texto de edição de uma célula, o que falha exatamente com Backspace e setas (com/sem Ctrl)? Depois: Vista SQL (passo 4), à frente da Estrutura.
+**Próximo passo:** `touch src/*.rs` + `cargo run` com o pacote do passo 4 e testar (ver registo de sessões). **Pendente:** Backspace/setas dentro do editor de célula (diagnóstico com `ACCESSQL_DEBUG=1`).
 
 ## 11. Registo de sessões
 
@@ -125,3 +129,6 @@ _(Acrescentar uma linha por sessão: data, o que foi feito, ficheiros alterados,
 - 2026-11-05 d: passos 1 e 2 compilados, testados e guardados no git (tags `passo1`, `passo2`). Passo 3 escrito (sem compilar): `db.rs` (`open`/`create`/`copy_to`/`compact`, erros em português), `ficheiro.rs` e `recentes.rs` (novos), `backstage.rs` reescrito (Informações reais, Recente, Novo com pasta e demo), `estado.rs` (`db_file`, `recentes`, `new_db_dir`; arranca sem BD e com o backstage aberto), `ribbon.rs` (título «AccesSQL» sem BD), `main.rs`. Por testar tudo isto.
 - 2026-11-05 e: passo 3 testado com sucesso (novo, demo, guardar cópia, reabrir, erros, persistência, ID alterado). Passo 3b escrito (sem compilar): `area_trabalho.rs` (seletor de registo, Delete/Backspace/Ctrl+setas/Home/End/PgUp/PgDn, menu de contexto Novo/Eliminar Registo, Enter confirma o diálogo, id fixo do editor), `estado.rs` (`row_sel`), `ribbon.rs` («Compactar e Reparar» ligado). Dúvida em aberto: Backspace e setas dentro do editor de célula.
 - 2026-11-05 f: relatado: Backspace e setas não fazem nada dentro do editor de célula; e uma mensagem «Esta vista não permite eliminar registos» ao tentar eliminar (objeto aberto por confirmar: tabela ou consulta?). Passo 3c = 3b + diagnóstico (`ACCESSQL_DEBUG=1` mostra na barra de estado as teclas recebidas e se o editor tem o foco). À espera do resultado.
+- 2026-11-05 g: causa da mensagem «Esta vista não permite eliminar registos» encontrada: `datasheet` faz `mem::take` dos dados do documento e `pedir_eliminar`/`novo_registo` (via Delete e menu de contexto) corriam a meio, com `editable=false`. Corrigido no passo 3d (ações adiadas para depois de devolver os dados). **Regra:** dentro de `datasheet`, não chamar métodos que leiam `docs[active].data` antes da linha que os devolve. Backspace/setas no editor: ainda por diagnosticar (`ACCESSQL_DEBUG=1`).
+- 2026-11-05 h: Delete e menu de contexto continuaram a dar «Esta vista não permite eliminar registos» com o ficheiro 3d correto (grep confirmado). Hipótese: build não recompilada (datas dos ficheiros do zip). Pedido `touch src/*.rs` + confirmar «Compiling accessql». Se persistir: acrescentar diagnóstico em `pedir_eliminar`.
+- 2026-11-06: passo 3 guardado no git (tag `passo3`; commit de `PROJETO.md` na raiz; `*.accsql` no `.gitignore`). Passo 4 escrito (sem compilar): `db.rs` (`executar`, `dividir`, `view_sql`, `guardar_vista`, `ler` partilhado, `ResultadoSql`, `TableData.truncado`), `consulta.rs` (novo), `estado.rs` (`ObjKind::Sql`, campos `sql`/`info`/`vista` em `Doc`, `pedir_nome`, `n_consulta`), `area_trabalho.rs` (sem `(Novo)` em vistas, `record_bar` com `novo`), `navegacao.rs` (menu «Vista SQL»), `ribbon.rs` (Criar reduzido a Tabela e Consulta SQL), `status.rs`, `app.rs`, `ficheiro.rs`, `main.rs`.
