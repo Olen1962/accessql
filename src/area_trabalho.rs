@@ -1,5 +1,20 @@
 use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
 use crate::{db::TableData, estado::*, icones::*, tema::*, widgets::*};
+#[derive(Default)]
+struct Teclas {
+    dx: i32,
+    dy: i32,
+    ctrl: bool,
+    home: bool,
+    end: bool,
+    pgup: bool,
+    pgdn: bool,
+    f2: bool,
+    delete: bool,
+    backspace: bool,
+    typed: String,
+}
+
 impl AccessApp {
 // ───────────── Área de trabalho (documentos em separadores) ─────────────
     pub(crate) fn workspace(&mut self, ctx: &egui::Context) {
@@ -46,11 +61,13 @@ impl AccessApp {
             if let Some(i) = close {
                 self.docs.remove(i);
                 self.edit = None;
+                self.row_sel = false;
                 self.active = self.active.saturating_sub(1);
                 return;
             }
             if let Some(i) = switch {
                 self.edit = None;
+                self.row_sel = false;
                 self.active = i;
                 self.sel = (0, 1);
             }
@@ -82,54 +99,121 @@ impl AccessApp {
         let digitando = ui.ctx().memory(|m| {
             matches!(m.focused(), Some(id) if id == egui::Id::new("nav_filter") || id == egui::Id::new("rec_search"))
         });
-        if self.edit.is_none() && ncols > 0 && !digitando {
-            let (dx, dy, f2, typed) = ui.input(|i| {
-                let mut dx = 0_i32;
-                let mut dy = 0_i32;
+        if self.edit.is_some() {
+            self.row_sel = false;
+        }
+        let mut commit: Option<(usize, usize, String, bool)> = None;
+        // ações que precisam dos dados do documento: executadas só depois de os devolver
+        let mut menu_act: Option<u8> = None;
+        if self.edit.is_none() && ncols > 0 && !digitando && self.confirm_del.is_none() {
+            let t = ui.input(|i| {
+                let mut t = Teclas::default();
+                t.ctrl = i.modifiers.command;
                 if i.key_pressed(egui::Key::ArrowRight) {
-                    dx += 1;
+                    t.dx += 1;
                 }
                 if i.key_pressed(egui::Key::ArrowLeft) {
-                    dx -= 1;
+                    t.dx -= 1;
                 }
                 if i.key_pressed(egui::Key::ArrowDown) {
-                    dy += 1;
+                    t.dy += 1;
                 }
                 if i.key_pressed(egui::Key::ArrowUp) {
-                    dy -= 1;
+                    t.dy -= 1;
                 }
-                let f2 = i.key_pressed(egui::Key::F2) || i.key_pressed(egui::Key::Enter);
-                let mut t = String::new();
-                for e in &i.events {
-                    if let egui::Event::Text(s) = e {
-                        if !s.chars().any(|c| c.is_control()) {
-                            t.push_str(s);
+                t.home = i.key_pressed(egui::Key::Home);
+                t.end = i.key_pressed(egui::Key::End);
+                t.pgup = i.key_pressed(egui::Key::PageUp);
+                t.pgdn = i.key_pressed(egui::Key::PageDown);
+                t.f2 = i.key_pressed(egui::Key::F2) || i.key_pressed(egui::Key::Enter);
+                t.delete = i.key_pressed(egui::Key::Delete);
+                t.backspace = i.key_pressed(egui::Key::Backspace);
+                if !i.modifiers.command {
+                    for e in &i.events {
+                        if let egui::Event::Text(s) = e {
+                            if !s.chars().any(|c| c.is_control()) {
+                                t.typed.push_str(s);
+                            }
                         }
                     }
                 }
-                (dx, dy, f2, t)
+                t
             });
-            if dx != 0 || dy != 0 {
-                self.sel.1 = (self.sel.1 as i32 + dx).clamp(0, ncols as i32 - 1) as usize;
-                self.sel.0 = (self.sel.0 as i32 + dy).clamp(0, nrows as i32) as usize;
+            let navega = t.dx != 0 || t.dy != 0 || t.home || t.end || t.pgup || t.pgdn;
+            if navega {
+                let pagina = (((h - hh) / rh).floor().max(1.0)) as i32;
+                let (mut r, mut c) = (self.sel.0 as i32, self.sel.1 as i32);
+                let (ult_r, ult_c) = ((nrows as i32 - 1).max(0), ncols as i32 - 1);
+                if t.ctrl {
+                    // Ctrl+setas: primeiro/último registo e campo; Ctrl+Home/End: cantos
+                    if t.dy < 0 {
+                        r = 0;
+                    }
+                    if t.dy > 0 {
+                        r = ult_r;
+                    }
+                    if t.dx < 0 {
+                        c = 0;
+                    }
+                    if t.dx > 0 {
+                        c = ult_c;
+                    }
+                    if t.home {
+                        r = 0;
+                        c = 0;
+                    }
+                    if t.end {
+                        r = ult_r;
+                        c = ult_c;
+                    }
+                } else {
+                    r += t.dy;
+                    c += t.dx;
+                    if t.home {
+                        c = 0;
+                    }
+                    if t.end {
+                        c = ult_c;
+                    }
+                    if t.pgup {
+                        r -= pagina;
+                    }
+                    if t.pgdn {
+                        r += pagina;
+                    }
+                }
+                self.sel = (r.clamp(0, nrows as i32) as usize, c.clamp(0, ult_c) as usize);
+                if t.dx != 0 || t.home || t.end {
+                    self.row_sel = false;
+                }
                 scroll_to_sel = true;
-            } else if editable && (f2 || !typed.is_empty()) {
+            } else if t.delete {
+                if self.row_sel {
+                    menu_act = Some(2);
+                } else if editable && self.sel.0 < nrows {
+                    commit = Some((self.sel.0, self.sel.1, String::new(), false));
+                }
+            } else if editable && (t.f2 || t.backspace || !t.typed.is_empty()) {
                 let (r, c) = self.sel;
-                let ini = if !typed.is_empty() {
-                    typed
+                let ini = if !t.typed.is_empty() {
+                    t.typed
+                } else if t.backspace {
+                    String::new()
                 } else if r < nrows {
                     data.rows[r][c].clone()
                 } else {
                     String::new()
                 };
+                self.row_sel = false;
                 self.edit = Some(Edicao { row: r, col: c, texto: ini, foco: true });
                 scroll_to_sel = true;
             }
         }
 
         let sel = self.sel;
-        let mut commit: Option<(usize, usize, String, bool)> = None;
+        let row_sel = self.row_sel;
         let mut hit: Option<(usize, usize, bool)> = None;
+        let mut gutter_hit: Option<usize> = None;
         {
             let cols = &data.cols;
             let rows = &data.rows;
@@ -156,7 +240,11 @@ impl AccessApp {
                 for ri in first..last {
                     let y = o.y + hh + rh * ri as f32;
                     if ri == sel.0 {
-                        p.rect_filled(Rect::from_min_size(Pos2::new(o.x, y), Vec2::new(sw, rh)), 0.0, rgb(0xC9D7EA));
+                        let cor = if row_sel { rgb(0xF2B84B) } else { rgb(0xC9D7EA) };
+                        p.rect_filled(Rect::from_min_size(Pos2::new(o.x, y), Vec2::new(sw, rh)), 0.0, cor);
+                        if row_sel {
+                            p.rect_filled(Rect::from_min_size(Pos2::new(o.x + sw, y), Vec2::new(data_w - sw - extra, rh)), 0.0, rgb(0xDCE8F7));
+                        }
                         tri(&p, [Pos2::new(o.x + 7.0, y + 5.0), Pos2::new(o.x + 7.0, y + rh - 5.0), Pos2::new(o.x + 14.0, y + rh / 2.0)], rgb(0x3A3A3A));
                     }
                     p.line_segment([Pos2::new(o.x, y + rh), Pos2::new(o.x + data_w, y + rh)], line);
@@ -186,7 +274,9 @@ impl AccessApp {
                     if scroll_to_sel {
                         ui.scroll_to_rect(Rect::from_min_max(cell.min - Vec2::new(0.0, hh), cell.max), None);
                     }
-                    p.rect_stroke(cell.shrink(0.5), 0.0, Stroke::new(2.0_f32, Color32::BLACK));
+                    if !row_sel {
+                        p.rect_stroke(cell.shrink(0.5), 0.0, Stroke::new(2.0_f32, Color32::BLACK));
+                    }
                 }
                 // editor da célula
                 let mut fin: Option<(usize, usize, String, bool, bool)> = None;
@@ -196,9 +286,26 @@ impl AccessApp {
                         let ecell = Rect::from_min_size(Pos2::new(ex, o.y + hh + rh * ed.row as f32), Vec2::new(cols[ed.col].1.max(90.0), rh));
                         p.rect_filled(ecell, 0.0, Color32::WHITE);
                         let te = egui::TextEdit::singleline(&mut ed.texto)
+                            .id(egui::Id::new("editor_celula"))
                             .frame(false)
                             .font(FontId::proportional(13.0));
                         let r = ui.put(ecell, te);
+                        if std::env::var_os("ACCESSQL_DEBUG").is_some() {
+                            // diagnóstico: que teclas chegam ao egui e se o editor tem o foco
+                            let teclas = ui.input(|i| {
+                                i.events
+                                    .iter()
+                                    .filter_map(|e| match e {
+                                        egui::Event::Key { key, pressed: true, .. } => Some(format!("{:?}", key)),
+                                        _ => None,
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            });
+                            if !teclas.is_empty() {
+                                self.msg = format!("[depuração] teclas={} foco={} texto={:?}", teclas, r.has_focus(), ed.texto);
+                            }
+                        }
                         if ed.foco {
                             r.request_focus();
                             ed.foco = false;
@@ -239,28 +346,62 @@ impl AccessApp {
                 }
                 p.line_segment([Pos2::new(o.x + sw, ty), Pos2::new(o.x + sw, ty + hh)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
                 p.line_segment([Pos2::new(o.x, ty + hh), Pos2::new(o.x + data_w, ty + hh)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
-                // cliques nas células
-                if resp.clicked() || resp.double_clicked() {
+                // cliques: células e seletor de registo (coluna à esquerda)
+                let localizar = |pos: Pos2| -> Option<(usize, Option<usize>)> {
+                    if pos.y <= ty + hh {
+                        return None;
+                    }
+                    let rel = pos - o;
+                    let ri = ((rel.y - hh) / rh) as usize;
+                    if ri > nrows {
+                        return None;
+                    }
+                    if rel.x <= sw {
+                        return Some((ri, None));
+                    }
+                    let mut acc = sw;
+                    for (ci, (_, w)) in cols.iter().enumerate() {
+                        if rel.x < acc + *w {
+                            return Some((ri, Some(ci)));
+                        }
+                        acc += *w;
+                    }
+                    None
+                };
+                if resp.clicked() || resp.double_clicked() || resp.secondary_clicked() {
                     if let Some(pos) = resp.interact_pointer_pos() {
-                        let rel = pos - o;
-                        if pos.y > ty + hh && rel.x > sw {
-                            let ri = ((rel.y - hh) / rh) as usize;
-                            if ri <= nrows {
-                                let mut acc = sw;
-                                for (ci, (_, w)) in cols.iter().enumerate() {
-                                    if rel.x < acc + *w {
-                                        hit = Some((ri, ci, resp.double_clicked()));
-                                        break;
-                                    }
-                                    acc += *w;
-                                }
-                            }
+                        match localizar(pos) {
+                            Some((ri, Some(ci))) => hit = Some((ri, ci, resp.double_clicked())),
+                            Some((ri, None)) => gutter_hit = Some(ri),
+                            None => {}
                         }
                     }
                 }
+                if editable {
+                    resp.context_menu(|ui| {
+                        if ui.button("Novo Registo").clicked() {
+                            menu_act = Some(1);
+                            ui.close_menu();
+                        }
+                        if ui.button("Eliminar Registo").clicked() {
+                            menu_act = Some(2);
+                            ui.close_menu();
+                        }
+                    });
+                }
             });
         }
+        if let Some(ri) = gutter_hit {
+            self.sel.0 = ri;
+            if ri < nrows {
+                self.row_sel = true;
+                self.msg = "Registo selecionado: prima Delete ou use Registos → Eliminar".into();
+            } else {
+                self.row_sel = false;
+            }
+        }
         if let Some((ri, ci, dbl)) = hit {
+            self.row_sel = false;
             self.sel = (ri, ci);
             if dbl && editable {
                 let ini = if ri < nrows { data.rows[ri][ci].clone() } else { String::new() };
@@ -277,6 +418,12 @@ impl AccessApp {
         }
         let total = data.rows.len();
         self.docs[self.active].data = data;
+        // só agora os dados voltaram ao documento
+        match menu_act {
+            Some(1) => self.novo_registo(),
+            Some(2) => self.pedir_eliminar(),
+            _ => {}
+        }
         self.record_bar(ui, total);
     }
 
@@ -363,6 +510,9 @@ impl AccessApp {
                     }
                 });
             });
+        if resp.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            resp = Some(true);
+        }
         match resp {
             Some(true) => {
                 self.confirm_del = None;

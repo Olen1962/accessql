@@ -58,6 +58,7 @@ pub(crate) struct AccessApp {
     pub(crate) edit: Option<Edicao>,
     pub(crate) scroll_sel: bool,
     pub(crate) confirm_del: Option<usize>,
+    pub(crate) row_sel: bool,
 }
 impl AccessApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -96,6 +97,7 @@ impl AccessApp {
             edit: None,
             scroll_sel: false,
             confirm_del: None,
+            row_sel: false,
         };
         app.refresh_nav();
         app
@@ -160,5 +162,6 @@ impl AccessApp {
         }
         self.sel = (0, 1);
         self.edit = None;
+        self.row_sel = false;
     }
 }

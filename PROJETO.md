@@ -60,6 +60,7 @@
 - Objetos do painel de navegação: **Tabelas** e **Consultas**. As consultas guardadas são **`VIEW`s** do SQLite.
 - **Formulários e Relatórios ficam fora** da primeira versão (remover `Form`/`Report` de `ObjKind` e as vistas `form_view`/`report_view`).
 - Vistas: Folha de Dados, Estrutura, **SQL** (editor + resultados).
+- Folha de dados: clicar no seletor de registo (coluna esquerda) seleciona o registo; Delete elimina (com confirmação). Com uma célula selecionada, Delete limpa-a, Backspace ou F2/Enter/escrever editam. Ctrl+setas = primeiro/último registo e campo.
 - Ao arrancar não há base de dados aberta e o backstage abre em «Recente» (ou «Novo», se não houver recentes).
 - Recentes em `~/.config/accessql/recentes.txt` (máx. 10). Abrir recusa ficheiros que não sejam SQLite.
 - «Guardar» não existe: o SQLite grava cada alteração logo. «Guardar Cópia Como» usa `VACUUM INTO`.
@@ -108,10 +109,11 @@ Em aberto:
 - [x] Âmbito e decisões fechados (secções 5 e 6).
 - [x] Passo 1: `db.rs` + `rusqlite`, navegação ligada ao catálogo, folha de dados a ler (testado, tag `passo1`).
 - [x] Passo 2: edição de células, `(Novo)`, Eliminar com confirmação, Atualizar, linhas visíveis (testado, tag `passo2`).
-- [~] Passo 3: Ficheiro → Novo / Abrir / Guardar Cópia Como / Fechar / Recentes / Compactar: escrito, **por compilar**.
+- [x] Passo 3: Ficheiro → Novo / Abrir / Guardar Cópia Como / Fechar / Recentes / Compactar (compilado e testado: criar, abrir, guardar cópia, erros, persistência).
+- [~] Passo 3b (ajustes após testes): seletor de registo, Delete, menu de contexto, teclado da grelha, Compactar no ribbon: escrito, **por compilar**.
 - [ ] Passos 4 a 7 (secção 9). Antes do 4: ordenar, filtrar e procurar na folha de dados (`ORDER BY` / `WHERE`).
 
-**Próximo passo:** `cargo check` com o pacote do passo 3 e testar: criar ficheiro, editar, fechar, reabrir pelos Recentes, ver que os dados ficaram guardados.
+**Próximo passo:** `cargo check` com o pacote 3b. Testar: clicar no seletor de registo (coluna à esquerda) e eliminar com Delete, com o menu de contexto e com Registos → Eliminar; Delete e Backspace numa célula selecionada; Ctrl+setas, Home/End, PgUp/PgDn. **Pendente de esclarecer:** na caixa de texto de edição de uma célula, o que falha exatamente com Backspace e setas (com/sem Ctrl)? Depois: Vista SQL (passo 4), à frente da Estrutura.
 
 ## 11. Registo de sessões
 
@@ -121,3 +123,5 @@ _(Acrescentar uma linha por sessão: data, o que foi feito, ficheiros alterados,
 - 2026-11-05 b: passo 1 escrito (sem compilar). Novo `db.rs` (SQLite, base de demonstração em memória com `Clientes`/`Encomendas`/`Produtos` + 2 `VIEW`s); `estado.rs` (`NavGroup`, `Doc.data`, `refresh_nav`, `open_doc` carrega da BD; `ObjKind` só `Table`/`Query`); `navegacao.rs` lê o catálogo; `area_trabalho.rs` (datasheet lê `TableData`, removidos `form_view`/`report_view`, corrigido pânico com 0 colunas/0 linhas); `status.rs`; `ribbon.rs` (título AccesSQL); `main.rs`; `Cargo.toml` (nome `accessql`, `rusqlite`). Por fazer: `cargo check`, depois passo 2.
 - 2026-11-05 c: passo 2 escrito (sem compilar). `db.rs` (rowid, update/insert/delete/fetch_row, `ID INTEGER PRIMARY KEY` na demo); `estado.rs` (`Edicao`, `scroll_sel`, `confirm_del`, `Doc.data` sem `Rc`); `area_trabalho.rs` (nova `datasheet` com edição, teclado, linhas visíveis, cabeçalho fixo; `gravar_celula`, `novo_registo`, `pedir_eliminar`, `dialogo_eliminar`, `recarregar_doc`); `ribbon.rs` (Registos ligado); `navegacao.rs` e `area_trabalho.rs` (ids dos campos de texto); `app.rs`. Por testar: edição, Tab/Enter, `(Novo)`, Eliminar.
 - 2026-11-05 d: passos 1 e 2 compilados, testados e guardados no git (tags `passo1`, `passo2`). Passo 3 escrito (sem compilar): `db.rs` (`open`/`create`/`copy_to`/`compact`, erros em português), `ficheiro.rs` e `recentes.rs` (novos), `backstage.rs` reescrito (Informações reais, Recente, Novo com pasta e demo), `estado.rs` (`db_file`, `recentes`, `new_db_dir`; arranca sem BD e com o backstage aberto), `ribbon.rs` (título «AccesSQL» sem BD), `main.rs`. Por testar tudo isto.
+- 2026-11-05 e: passo 3 testado com sucesso (novo, demo, guardar cópia, reabrir, erros, persistência, ID alterado). Passo 3b escrito (sem compilar): `area_trabalho.rs` (seletor de registo, Delete/Backspace/Ctrl+setas/Home/End/PgUp/PgDn, menu de contexto Novo/Eliminar Registo, Enter confirma o diálogo, id fixo do editor), `estado.rs` (`row_sel`), `ribbon.rs` («Compactar e Reparar» ligado). Dúvida em aberto: Backspace e setas dentro do editor de célula.
+- 2026-11-05 f: relatado: Backspace e setas não fazem nada dentro do editor de célula; e uma mensagem «Esta vista não permite eliminar registos» ao tentar eliminar (objeto aberto por confirmar: tabela ou consulta?). Passo 3c = 3b + diagnóstico (`ACCESSQL_DEBUG=1` mostra na barra de estado as teclas recebidas e se o editor tem o foco). À espera do resultado.

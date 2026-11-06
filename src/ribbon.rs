@@ -222,7 +222,9 @@ impl AccessApp {
     }
     pub(crate) fn ribbon_ferramentas(&mut self, ui: &mut Ui) {
         group(ui, "Ferramentas", |ui| {
-            self.rb(ui, Icon::Badge("C", C_GREEN), "Compactar e\nReparar", None);
+            if big_btn(ui, Icon::Badge("C", C_GREEN), "Compactar e\nReparar", false).clicked() {
+                self.compactar_bd();
+            }
             self.rb(ui, Icon::Badge("M", C_ORANGE), "Executar\nMacro", None);
         });
         group(ui, "Relações", |ui| {
