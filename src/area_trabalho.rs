@@ -1,5 +1,5 @@
 use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
-use crate::{estado::*, icones::*, tema::*, widgets::*};
+use crate::{db::TableData, estado::*, icones::*, tema::*, widgets::*};
 impl AccessApp {
 // ───────────── Área de trabalho (documentos em separadores) ─────────────
     pub(crate) fn workspace(&mut self, ctx: &egui::Context) {
@@ -45,10 +45,12 @@ impl AccessApp {
             });
             if let Some(i) = close {
                 self.docs.remove(i);
+                self.edit = None;
                 self.active = self.active.saturating_sub(1);
                 return;
             }
             if let Some(i) = switch {
+                self.edit = None;
                 self.active = i;
                 self.sel = (0, 1);
             }
@@ -63,87 +65,348 @@ impl AccessApp {
         });
     }
     pub(crate) fn datasheet(&mut self, ui: &mut Ui, _name: &str) {
-        let data = self.docs[self.active].data.clone();
-        let (cols, rows) = (&data.cols, &data.rows);
+        let mut data = std::mem::take(&mut self.docs[self.active].data);
+        let tabela = self.docs[self.active].name.clone();
         let (rh, hh, sw) = (21.0_f32, 24.0_f32, 22.0_f32);
         let extra = 150.0_f32;
-        let data_w = sw + cols.iter().map(|c| c.1).sum::<f32>() + extra;
-        self.sel.0 = self.sel.0.min(rows.len());
-        self.sel.1 = self.sel.1.min(cols.len().saturating_sub(1));
+        let ncols = data.cols.len();
+        let nrows = data.rows.len();
+        let data_w = sw + data.cols.iter().map(|c| c.1).sum::<f32>() + extra;
+        self.sel.0 = self.sel.0.min(nrows);
+        self.sel.1 = self.sel.1.min(ncols.saturating_sub(1));
+        let editable = data.editable && ncols > 0;
         let h = (ui.available_height() - 27.0).max(60.0);
-        egui::ScrollArea::both().auto_shrink([false, false]).max_height(h).show(ui, |ui| {
-            let width = data_w.max(ui.available_width());
-            let grid_bottom_rel = hh + rh * (rows.len() as f32 + 1.0);
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, grid_bottom_rel.max(h)), Sense::click());
-            let p = ui.painter().clone();
-            let o = rect.min;
-            let line = Stroke::new(1.0_f32, GRID);
-            let gb = o.y + grid_bottom_rel;
-            p.rect_filled(rect, 0.0, Color32::WHITE);
-            // cabeçalho
-            p.rect_filled(Rect::from_min_size(o, Vec2::new(data_w, hh)), 0.0, rgb(0xF2F2F2));
-            p.rect_filled(Rect::from_min_size(o, Vec2::new(sw, gb - o.y)), 0.0, rgb(0xE9E9E9));
-            let mut x = o.x + sw;
-            for (label, w) in cols.iter() {
-                let w = *w;
-                p.text(Pos2::new(x + 6.0, o.y + hh / 2.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), Color32::BLACK);
-                down_arrow(&p, Pos2::new(x + w - 11.0, o.y + hh / 2.0), rgb(0x6A6A6A));
-                x += w;
-                p.line_segment([Pos2::new(x, o.y), Pos2::new(x, gb)], line);
+
+        // ── teclado (quando não se está a editar) ──
+        let mut scroll_to_sel = std::mem::take(&mut self.scroll_sel);
+        let digitando = ui.ctx().memory(|m| {
+            matches!(m.focused(), Some(id) if id == egui::Id::new("nav_filter") || id == egui::Id::new("rec_search"))
+        });
+        if self.edit.is_none() && ncols > 0 && !digitando {
+            let (dx, dy, f2, typed) = ui.input(|i| {
+                let mut dx = 0_i32;
+                let mut dy = 0_i32;
+                if i.key_pressed(egui::Key::ArrowRight) {
+                    dx += 1;
+                }
+                if i.key_pressed(egui::Key::ArrowLeft) {
+                    dx -= 1;
+                }
+                if i.key_pressed(egui::Key::ArrowDown) {
+                    dy += 1;
+                }
+                if i.key_pressed(egui::Key::ArrowUp) {
+                    dy -= 1;
+                }
+                let f2 = i.key_pressed(egui::Key::F2) || i.key_pressed(egui::Key::Enter);
+                let mut t = String::new();
+                for e in &i.events {
+                    if let egui::Event::Text(s) = e {
+                        if !s.chars().any(|c| c.is_control()) {
+                            t.push_str(s);
+                        }
+                    }
+                }
+                (dx, dy, f2, t)
+            });
+            if dx != 0 || dy != 0 {
+                self.sel.1 = (self.sel.1 as i32 + dx).clamp(0, ncols as i32 - 1) as usize;
+                self.sel.0 = (self.sel.0 as i32 + dy).clamp(0, nrows as i32) as usize;
+                scroll_to_sel = true;
+            } else if editable && (f2 || !typed.is_empty()) {
+                let (r, c) = self.sel;
+                let ini = if !typed.is_empty() {
+                    typed
+                } else if r < nrows {
+                    data.rows[r][c].clone()
+                } else {
+                    String::new()
+                };
+                self.edit = Some(Edicao { row: r, col: c, texto: ini, foco: true });
+                scroll_to_sel = true;
             }
-            p.text(Pos2::new(x + 6.0, o.y + hh / 2.0), Align2::LEFT_CENTER, "Clique para Adicionar", FontId::proportional(13.0), rgb(0x5A7FB5));
-            down_arrow(&p, Pos2::new(x + extra - 11.0, o.y + hh / 2.0), rgb(0x5A7FB5));
-            p.line_segment([Pos2::new(o.x + sw, o.y), Pos2::new(o.x + sw, gb)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
-            p.line_segment([Pos2::new(o.x, o.y + hh), Pos2::new(o.x + data_w, o.y + hh)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
-            // linhas
-            for ri in 0..=rows.len() {
-                let y = o.y + hh + rh * ri as f32;
-                if ri == self.sel.0 {
-                    p.rect_filled(Rect::from_min_size(Pos2::new(o.x, y), Vec2::new(sw, rh)), 0.0, rgb(0xC9D7EA));
-                    tri(&p, [Pos2::new(o.x + 7.0, y + 5.0), Pos2::new(o.x + 7.0, y + rh - 5.0), Pos2::new(o.x + 14.0, y + rh / 2.0)], rgb(0x3A3A3A));
+        }
+
+        let sel = self.sel;
+        let mut commit: Option<(usize, usize, String, bool)> = None;
+        let mut hit: Option<(usize, usize, bool)> = None;
+        {
+            let cols = &data.cols;
+            let rows = &data.rows;
+            egui::ScrollArea::both().auto_shrink([false, false]).max_height(h).show_viewport(ui, |ui, vp| {
+                let width = data_w.max(ui.available_width());
+                let grid_h = hh + rh * (nrows as f32 + 1.0);
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, grid_h.max(h)), Sense { click: true, drag: false, focusable: false });
+                let p = ui.painter().clone();
+                let o = rect.min;
+                let ty = o.y + vp.min.y; // topo visível (cabeçalho fixo)
+                let line = Stroke::new(1.0_f32, GRID);
+                let gb = o.y + grid_h;
+                p.rect_filled(rect, 0.0, Color32::WHITE);
+                p.rect_filled(Rect::from_min_size(o, Vec2::new(sw, gb - o.y)), 0.0, rgb(0xE9E9E9));
+                // linhas verticais das colunas
+                let mut x = o.x + sw;
+                for (_, w) in cols.iter() {
+                    x += *w;
+                    p.line_segment([Pos2::new(x, o.y), Pos2::new(x, gb)], line);
                 }
-                p.line_segment([Pos2::new(o.x, y + rh), Pos2::new(o.x + data_w, y + rh)], line);
-                if ri == rows.len() {
-                    p.text(Pos2::new(o.x + sw / 2.0, y + rh / 2.0 + 2.0), Align2::CENTER_CENTER, "*", FontId::proportional(14.0), rgb(0x555555));
-                    p.text(Pos2::new(o.x + sw + 6.0, y + rh / 2.0), Align2::LEFT_CENTER, "(Novo)", FontId::proportional(13.0), rgb(0x8A8A8A));
-                    continue;
+                // só as linhas visíveis
+                let first = (((vp.min.y - hh) / rh).floor().max(0.0)) as usize;
+                let last = ((((vp.max.y - hh) / rh).ceil().max(0.0)) as usize + 1).min(nrows + 1);
+                for ri in first..last {
+                    let y = o.y + hh + rh * ri as f32;
+                    if ri == sel.0 {
+                        p.rect_filled(Rect::from_min_size(Pos2::new(o.x, y), Vec2::new(sw, rh)), 0.0, rgb(0xC9D7EA));
+                        tri(&p, [Pos2::new(o.x + 7.0, y + 5.0), Pos2::new(o.x + 7.0, y + rh - 5.0), Pos2::new(o.x + 14.0, y + rh / 2.0)], rgb(0x3A3A3A));
+                    }
+                    p.line_segment([Pos2::new(o.x, y + rh), Pos2::new(o.x + data_w, y + rh)], line);
+                    if ri == nrows {
+                        p.text(Pos2::new(o.x + sw / 2.0, y + rh / 2.0 + 2.0), Align2::CENTER_CENTER, "*", FontId::proportional(14.0), rgb(0x555555));
+                        p.text(Pos2::new(o.x + sw + 6.0, y + rh / 2.0), Align2::LEFT_CENTER, "(Novo)", FontId::proportional(13.0), rgb(0x8A8A8A));
+                        continue;
+                    }
+                    let mut cx = o.x + sw;
+                    for (ci, (_, w)) in cols.iter().enumerate() {
+                        let cell = Rect::from_min_size(Pos2::new(cx, y), Vec2::new(*w, rh));
+                        p.with_clip_rect(cell.intersect(p.clip_rect())).text(
+                            Pos2::new(cx + 6.0, y + rh / 2.0),
+                            Align2::LEFT_CENTER,
+                            &rows[ri][ci],
+                            FontId::proportional(13.0),
+                            Color32::BLACK,
+                        );
+                        cx += *w;
+                    }
                 }
-                let mut cx = o.x + sw;
-                for (ci, &(_, w)) in cols.iter().enumerate() {
-                    p.text(Pos2::new(cx + 6.0, y + rh / 2.0), Align2::LEFT_CENTER, &rows[ri][ci], FontId::proportional(13.0), Color32::BLACK);
-                    cx += w;
+                // célula ativa
+                if ncols > 0 {
+                    let cx = o.x + sw + cols.iter().take(sel.1).map(|c| c.1).sum::<f32>();
+                    let cy = o.y + hh + rh * sel.0 as f32;
+                    let cell = Rect::from_min_size(Pos2::new(cx, cy), Vec2::new(cols[sel.1].1, rh));
+                    if scroll_to_sel {
+                        ui.scroll_to_rect(Rect::from_min_max(cell.min - Vec2::new(0.0, hh), cell.max), None);
+                    }
+                    p.rect_stroke(cell.shrink(0.5), 0.0, Stroke::new(2.0_f32, Color32::BLACK));
                 }
-            }
-            // célula ativa
-            let mut cx = o.x + sw;
-            for (ci, &(_, w)) in cols.iter().enumerate() {
-                if ci == self.sel.1 {
-                    let y = o.y + hh + rh * self.sel.0 as f32;
-                    p.rect_stroke(Rect::from_min_size(Pos2::new(cx, y), Vec2::new(w, rh)).shrink(0.5), 0.0, Stroke::new(2.0_f32, Color32::BLACK));
+                // editor da célula
+                let mut fin: Option<(usize, usize, String, bool, bool)> = None;
+                if let Some(ed) = self.edit.as_mut() {
+                    if ed.row <= nrows && ed.col < ncols {
+                        let ex = o.x + sw + cols.iter().take(ed.col).map(|c| c.1).sum::<f32>();
+                        let ecell = Rect::from_min_size(Pos2::new(ex, o.y + hh + rh * ed.row as f32), Vec2::new(cols[ed.col].1.max(90.0), rh));
+                        p.rect_filled(ecell, 0.0, Color32::WHITE);
+                        let te = egui::TextEdit::singleline(&mut ed.texto)
+                            .frame(false)
+                            .font(FontId::proportional(13.0));
+                        let r = ui.put(ecell, te);
+                        if ed.foco {
+                            r.request_focus();
+                            ed.foco = false;
+                        }
+                        p.rect_stroke(ecell.shrink(0.5), 0.0, Stroke::new(2.0_f32, Color32::BLACK));
+                        let (enter, tab, esc) = ui.input(|i| {
+                            (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Tab), i.key_pressed(egui::Key::Escape))
+                        });
+                        if esc {
+                            fin = Some((ed.row, ed.col, String::new(), false, true));
+                        } else if r.lost_focus() {
+                            fin = Some((ed.row, ed.col, ed.texto.clone(), enter || tab, false));
+                        }
+                    } else {
+                        fin = Some((0, 0, String::new(), false, true));
+                    }
                 }
-                cx += w;
-            }
-            if resp.clicked() {
-                if let Some(pos) = resp.interact_pointer_pos() {
-                    let rel = pos - o;
-                    if rel.y > hh && rel.x > sw {
-                        let ri = ((rel.y - hh) / rh) as usize;
-                        if ri <= rows.len() {
-                            self.sel.0 = ri;
-                            let mut acc = sw;
-                            for (ci, &(_, w)) in cols.iter().enumerate() {
-                                if rel.x < acc + w {
-                                    self.sel.1 = ci;
-                                    break;
+                if let Some((r, c, t, adv, esc)) = fin {
+                    self.edit = None;
+                    if !esc {
+                        commit = Some((r, c, t, adv));
+                    }
+                }
+                // cabeçalho (fixo no topo da área visível)
+                p.rect_filled(Rect::from_min_size(Pos2::new(o.x, ty), Vec2::new(data_w, hh)), 0.0, rgb(0xF2F2F2));
+                p.rect_filled(Rect::from_min_size(Pos2::new(o.x, ty), Vec2::new(sw, hh)), 0.0, rgb(0xE9E9E9));
+                let mut x = o.x + sw;
+                for (label, w) in cols.iter() {
+                    let w = *w;
+                    p.text(Pos2::new(x + 6.0, ty + hh / 2.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), Color32::BLACK);
+                    down_arrow(&p, Pos2::new(x + w - 11.0, ty + hh / 2.0), rgb(0x6A6A6A));
+                    x += w;
+                    p.line_segment([Pos2::new(x, ty), Pos2::new(x, ty + hh)], line);
+                }
+                if editable {
+                    p.text(Pos2::new(x + 6.0, ty + hh / 2.0), Align2::LEFT_CENTER, "Clique para Adicionar", FontId::proportional(13.0), rgb(0x5A7FB5));
+                    down_arrow(&p, Pos2::new(x + extra - 11.0, ty + hh / 2.0), rgb(0x5A7FB5));
+                }
+                p.line_segment([Pos2::new(o.x + sw, ty), Pos2::new(o.x + sw, ty + hh)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
+                p.line_segment([Pos2::new(o.x, ty + hh), Pos2::new(o.x + data_w, ty + hh)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
+                // cliques nas células
+                if resp.clicked() || resp.double_clicked() {
+                    if let Some(pos) = resp.interact_pointer_pos() {
+                        let rel = pos - o;
+                        if pos.y > ty + hh && rel.x > sw {
+                            let ri = ((rel.y - hh) / rh) as usize;
+                            if ri <= nrows {
+                                let mut acc = sw;
+                                for (ci, (_, w)) in cols.iter().enumerate() {
+                                    if rel.x < acc + *w {
+                                        hit = Some((ri, ci, resp.double_clicked()));
+                                        break;
+                                    }
+                                    acc += *w;
                                 }
-                                acc += w;
                             }
                         }
                     }
                 }
+            });
+        }
+        if let Some((ri, ci, dbl)) = hit {
+            self.sel = (ri, ci);
+            if dbl && editable {
+                let ini = if ri < nrows { data.rows[ri][ci].clone() } else { String::new() };
+                self.edit = Some(Edicao { row: ri, col: ci, texto: ini, foco: true });
             }
-        });
-        self.record_bar(ui, rows.len());
+        }
+        if let Some((r, c, t, adv)) = commit {
+            self.gravar_celula(&mut data, &tabela, r, c, t);
+            let n = data.rows.len();
+            if adv {
+                self.sel = if c + 1 < ncols { (r, c + 1) } else { ((r + 1).min(n), 0) };
+                self.scroll_sel = true;
+            }
+        }
+        let total = data.rows.len();
+        self.docs[self.active].data = data;
+        self.record_bar(ui, total);
+    }
+
+    /// Grava uma célula (UPDATE) ou cria um registo novo (INSERT) na linha `(Novo)`.
+    fn gravar_celula(&mut self, data: &mut TableData, tabela: &str, r: usize, c: usize, texto: String) {
+        let Some(db) = self.db.as_ref() else { return };
+        let col = data.cols[c].0.clone();
+        if r < data.rows.len() {
+            if data.rows[r][c] == texto {
+                return;
+            }
+            let rid = data.rowids[r];
+            if let Err(e) = db.update_cell(tabela, &col, rid, &texto) {
+                self.msg = format!("Não foi possível gravar: {}", e);
+                return;
+            }
+            match db.fetch_row(tabela, rid) {
+                Ok(Some(row)) => data.rows[r] = row,
+                _ => {
+                    // a chave mudou (por exemplo, o campo ID): voltar a ler a tabela
+                    if let Ok(d) = db.load(tabela, true) {
+                        *data = d;
+                    }
+                }
+            }
+        } else {
+            if texto.is_empty() {
+                return;
+            }
+            match db.insert_cell(tabela, &col, &texto) {
+                Ok(rid) => match db.fetch_row(tabela, rid) {
+                    Ok(Some(row)) => {
+                        data.rows.push(row);
+                        data.rowids.push(rid);
+                    }
+                    _ => {
+                        if let Ok(d) = db.load(tabela, true) {
+                            *data = d;
+                        }
+                    }
+                },
+                Err(e) => self.msg = format!("Não foi possível criar o registo: {}", e),
+            }
+        }
+    }
+
+    /// Vai para a linha `(Novo)` da folha de dados ativa.
+    pub(crate) fn novo_registo(&mut self) {
+        match self.docs.get(self.active) {
+            Some(d) if d.data.editable => {
+                self.sel = (d.data.rows.len(), 0);
+                self.scroll_sel = true;
+            }
+            _ => self.msg = "Esta vista não permite criar registos".into(),
+        }
+    }
+
+    /// Pede confirmação antes de eliminar o registo selecionado.
+    pub(crate) fn pedir_eliminar(&mut self) {
+        match self.docs.get(self.active) {
+            Some(d) if d.data.editable && self.sel.0 < d.data.rows.len() => self.confirm_del = Some(self.sel.0),
+            Some(d) if d.data.editable => self.msg = "Selecione um registo para eliminar".into(),
+            _ => self.msg = "Esta vista não permite eliminar registos".into(),
+        }
+    }
+
+    pub(crate) fn dialogo_eliminar(&mut self, ctx: &egui::Context) {
+        let Some(row) = self.confirm_del else { return };
+        let mut resp: Option<bool> = None;
+        egui::Window::new("AccesSQL")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label("Vai eliminar 1 registo.");
+                ui.label("Não poderá anular esta operação. Quer eliminar o registo?");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Sim").clicked() {
+                        resp = Some(true);
+                    }
+                    if ui.button("Não").clicked() {
+                        resp = Some(false);
+                    }
+                });
+            });
+        match resp {
+            Some(true) => {
+                self.confirm_del = None;
+                self.eliminar_registo(row);
+            }
+            Some(false) => self.confirm_del = None,
+            None => {}
+        }
+    }
+
+    fn eliminar_registo(&mut self, row: usize) {
+        let Some(doc) = self.docs.get(self.active) else { return };
+        if row >= doc.data.rows.len() {
+            return;
+        }
+        let nome = doc.name.clone();
+        let rid = doc.data.rowids[row];
+        match self.db.as_ref().map(|d| d.delete_row(&nome, rid)) {
+            Some(Ok(())) => {
+                let d = &mut self.docs[self.active].data;
+                d.rows.remove(row);
+                d.rowids.remove(row);
+                self.sel.0 = row.min(d.rows.len());
+                self.msg = "Registo eliminado".into();
+            }
+            Some(Err(e)) => self.msg = format!("Não foi possível eliminar: {}", e),
+            None => {}
+        }
+    }
+
+    /// Volta a ler a tabela ou consulta ativa (e o painel de navegação).
+    pub(crate) fn recarregar_doc(&mut self) {
+        self.refresh_nav();
+        let Some(doc) = self.docs.get(self.active) else { return };
+        let (nome, kind) = (doc.name.clone(), doc.kind);
+        match self.db.as_ref().map(|d| d.load(&nome, kind == ObjKind::Table)) {
+            Some(Ok(d)) => {
+                self.docs[self.active].data = d;
+                self.edit = None;
+                self.msg = format!("«{}» atualizada", nome);
+            }
+            Some(Err(e)) => self.msg = format!("Erro ao atualizar «{}»: {}", nome, e),
+            None => {}
+        }
     }
     pub(crate) fn record_bar(&mut self, ui: &mut Ui, total: usize) {
         Frame::none().fill(rgb(0xF0F0F0)).inner_margin(Margin::symmetric(6.0, 3.0)).show(ui, |ui| {
@@ -178,7 +441,7 @@ impl AccessApp {
                     ui.label(RichText::new("Sem Filtro").size(12.0).color(rgb(0x555555)));
                 });
                 ui.add_space(4.0);
-                ui.add(egui::TextEdit::singleline(&mut self.rec_search).hint_text("Procurar").desired_width(170.0));
+                ui.add(egui::TextEdit::singleline(&mut self.rec_search).id(egui::Id::new("rec_search")).hint_text("Procurar").desired_width(170.0));
             });
         });
     }

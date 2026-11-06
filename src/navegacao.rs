@@ -18,7 +18,7 @@ impl AccessApp {
                 self.act(&resp, "Categoria", Some("navcat"));
                 Frame::none().inner_margin(Margin::same(4.0)).show(ui, |ui| {
                     let w = ui.available_width();
-                    ui.add(egui::TextEdit::singleline(&mut self.nav_filter).hint_text("Procurar...").desired_width(w));
+                    ui.add(egui::TextEdit::singleline(&mut self.nav_filter).id(egui::Id::new("nav_filter")).hint_text("Procurar...").desired_width(w));
                 });
                 let nav = self.nav.clone();
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {

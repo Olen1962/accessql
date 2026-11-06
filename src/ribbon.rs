@@ -117,12 +117,21 @@ impl AccessApp {
             ]);
         });
         group(ui, "Registos", |ui| {
-            self.rb(ui, Icon::Badge("R", C_GREEN), "Atualizar\nTudo", Some("mais_reg"));
-            self.stack(ui, &[
-                (Icon::Badge("+", C_GREEN), "Novo", None),
-                (Icon::Save, "Guardar", None),
-                (Icon::Badge("x", C_RED), "Eliminar", None),
-            ]);
+            if big_btn(ui, Icon::Badge("R", C_GREEN), "Atualizar\nTudo", false).clicked() {
+                self.recarregar_doc();
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                if small_btn(ui, Icon::Badge("+", C_GREEN), "Novo", false).clicked() {
+                    self.novo_registo();
+                }
+                if small_btn(ui, Icon::Save, "Guardar", false).clicked() {
+                    self.msg = "Os registos são gravados automaticamente".into();
+                }
+                if small_btn(ui, Icon::Badge("x", C_RED), "Eliminar", false).clicked() {
+                    self.pedir_eliminar();
+                }
+            });
             self.stack(ui, &[
                 (Icon::Badge("S", C_PURPLE), "Totais", None),
                 (Icon::Badge("O", C_BLUE), "Ortografia", None),

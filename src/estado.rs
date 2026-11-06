@@ -1,5 +1,4 @@
 use eframe::egui::{self, Color32, FontId, Rect, Response, Stroke, Ui, Vec2};
-use std::rc::Rc;
 use crate::{db::{Database, TableData}, icones::*, tema::*, widgets::*};
 // ───────────────────────────── Estado da aplicação ─────────────────────────────
 #[derive(Clone, Copy, PartialEq)]
@@ -24,7 +23,15 @@ pub(crate) struct NavGroup {
 pub(crate) struct Doc {
     pub(crate) kind: ObjKind,
     pub(crate) name: String,
-    pub(crate) data: Rc<TableData>,
+    pub(crate) data: TableData,
+}
+
+/// Célula da folha de dados que está a ser editada.
+pub(crate) struct Edicao {
+    pub(crate) row: usize,
+    pub(crate) col: usize,
+    pub(crate) texto: String,
+    pub(crate) foco: bool,
 }
 pub(crate) struct AccessApp {
     pub(crate) tab: usize,
@@ -44,6 +51,9 @@ pub(crate) struct AccessApp {
     pub(crate) new_db_name: String,
     pub(crate) db_path: String,
     pub(crate) msg: String,
+    pub(crate) edit: Option<Edicao>,
+    pub(crate) scroll_sel: bool,
+    pub(crate) confirm_del: Option<usize>,
 }
 impl AccessApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -78,6 +88,9 @@ impl AccessApp {
             new_db_name: "Base1.accsql".into(),
             db_path: "Demonstração".into(),
             msg: err,
+            edit: None,
+            scroll_sel: false,
+            confirm_del: None,
         };
         app.refresh_nav();
         app.open_doc(ObjKind::Table, "Clientes".into());
@@ -130,8 +143,8 @@ impl AccessApp {
         if let Some(i) = self.docs.iter().position(|d| d.kind == kind && d.name == name) {
             self.active = i;
         } else {
-            let data = match self.db.as_ref().map(|d| d.load(&name)) {
-                Some(Ok(d)) => Rc::new(d),
+            let data = match self.db.as_ref().map(|d| d.load(&name, kind == ObjKind::Table)) {
+                Some(Ok(d)) => d,
                 Some(Err(e)) => {
                     self.msg = format!("Erro ao abrir «{}»: {}", name, e);
                     return;
@@ -145,5 +158,6 @@ impl AccessApp {
             self.active = self.docs.len() - 1;
         }
         self.sel = (0, 1);
+        self.edit = None;
     }
 }

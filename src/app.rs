@@ -6,6 +6,7 @@ impl eframe::App for AccessApp {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.backstage = false;
             self.dropdown = None;
+            self.confirm_del = None;
         }
         self.qat(ctx);
         self.tab_strip(ctx);
@@ -16,6 +17,7 @@ impl eframe::App for AccessApp {
             self.ribbon(ctx);
             self.nav_pane(ctx);
             self.workspace(ctx);
+            self.dialogo_eliminar(ctx);
         }
         self.show_dropdown(ctx);
     }
