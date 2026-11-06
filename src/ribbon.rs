@@ -11,7 +11,7 @@ impl AccessApp {
                 ui.painter().text(
                     full.center(),
                     Align2::CENTER_CENTER,
-                    format!("{} : Base de Dados SQLite - AccesSQL", self.db_path),
+                    if self.db.is_some() { format!("{} : Base de Dados SQLite - AccesSQL", self.db_path) } else { "AccesSQL".to_string() },
                     FontId::proportional(12.5),
                     TEXT,
                 );

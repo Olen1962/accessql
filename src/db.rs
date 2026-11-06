@@ -1,6 +1,6 @@
 //! Camada de dados do AccesSQL (SQLite local, via rusqlite).
 
-use rusqlite::{params, params_from_iter, types::Value, types::ValueRef, Connection, Row};
+use rusqlite::{params, params_from_iter, types::Value, types::ValueRef, Connection, OpenFlags, Row};
 use std::path::Path;
 
 /// Conteúdo de uma tabela ou consulta já carregado em memória.
@@ -22,6 +22,18 @@ pub(crate) struct Database {
 /// Escapa um identificador SQL: "nome" (aspas duplicadas dentro do nome).
 pub(crate) fn quote(id: &str) -> String {
     format!("\"{}\"", id.replace('"', "\"\""))
+}
+
+/// Mensagens de erro do SQLite em português, para a barra de estado.
+fn traduz(e: rusqlite::Error) -> String {
+    let s = e.to_string();
+    if s.contains("not a database") || s.contains("encrypted") {
+        "O ficheiro não é uma base de dados SQLite válida".into()
+    } else if s.contains("unable to open") {
+        "Não foi possível abrir o ficheiro (confirme o caminho e as permissões)".into()
+    } else {
+        s
+    }
 }
 
 /// Texto vazio grava-se como NULL (como no Access); o resto como texto.
@@ -53,10 +65,43 @@ fn linha(r: &Row, de: usize, ate: usize) -> rusqlite::Result<Vec<String>> {
 }
 
 impl Database {
-    /// Abre (ou cria, se não existir) um ficheiro de base de dados.
-    #[allow(dead_code)] // usado no passo 3 (Ficheiro → Novo/Abrir)
-    pub(crate) fn open(path: &Path) -> rusqlite::Result<Self> {
-        Ok(Self { conn: Connection::open(path)? })
+    /// Abre um ficheiro existente. Não cria nada se o ficheiro não existir
+    /// e recusa ficheiros que não sejam SQLite.
+    pub(crate) fn open(path: &Path) -> Result<Self, String> {
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(traduz)?;
+        conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get::<_, i64>(0))
+            .map_err(traduz)?;
+        Ok(Self { conn })
+    }
+
+    /// Cria um ficheiro novo e vazio. Recusa se já existir um ficheiro com esse nome.
+    pub(crate) fn create(path: &Path) -> Result<Self, String> {
+        if path.exists() {
+            return Err(format!("Já existe um ficheiro com esse nome: {}", path.display()));
+        }
+        let conn = Connection::open(path).map_err(traduz)?;
+        conn.execute_batch("PRAGMA user_version = 1;").map_err(traduz)?;
+        Ok(Self { conn })
+    }
+
+    /// Grava uma cópia compacta da base de dados em `path` (que não pode existir).
+    pub(crate) fn copy_to(&self, path: &Path) -> Result<(), String> {
+        let p = path.to_string_lossy().replace('\'', "''");
+        self.conn.execute_batch(&format!("VACUUM INTO '{}'", p)).map_err(traduz)
+    }
+
+    /// Verifica a integridade e compacta o ficheiro. Devolve o resultado da verificação.
+    pub(crate) fn compact(&self) -> Result<String, String> {
+        let r: String = self
+            .conn
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .map_err(traduz)?;
+        self.conn.execute_batch("VACUUM").map_err(traduz)?;
+        Ok(r)
     }
 
     /// Base de dados em memória com os dados do modelo visual.

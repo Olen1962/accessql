@@ -3,6 +3,8 @@ mod icones;
 mod widgets;
 mod dados_exemplo;
 mod db;
+mod ficheiro;
+mod recentes;
 mod estado;
 mod ribbon;
 mod navegacao;

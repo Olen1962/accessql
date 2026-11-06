@@ -25,10 +25,11 @@
 
 - Sistema: FreeBSD (x11). Repositório: https://github.com/Olen1962/accessql (público, ramo `main`, remote por SSH via `gh`).
 - Rust edition 2021. `eframe = 0.29` (`default-features = false`, features `default_fonts`, `glow`, `x11`). `rfd = 0.15` para diálogos de ficheiros.
-- A juntar: `rusqlite = { version = "0.32", features = ["bundled"] }`.
+- `rusqlite = { version = "0.32", features = ["bundled"] }` (já no `Cargo.toml`).
+- FreeBSD: `sed -i ''` (aspas vazias a seguir ao `-i`).
 - Grelha e ribbon são **desenhados à mão** com `painter` (não usar `egui_extras`).
 - `.gitignore` tem de incluir `target/` (o binário passa dos 100 MB e o GitHub rejeita o push).
-- Pendente: mudar `name` no `Cargo.toml` de `access_ui` para `accessql`.
+- Pacote já renomeado para `accessql`.
 
 ## 4. Estrutura do código (`src/`)
 
@@ -36,11 +37,14 @@
 |---|---|
 | `main.rs` | Janela eframe, declara os módulos |
 | `app.rs` | `update()` por frame: QAT, separadores, barra de estado, backstage ou ribbon + navegação + área de trabalho |
-| `estado.rs` | `AccessApp` (estado global), `ObjKind`, `Doc`, helpers `rb`/`stack`/`act`/`open_doc` |
+| `estado.rs` | `AccessApp` (estado global), `ObjKind` (`Table`/`Query`), `Doc` (com `TableData`), `NavGroup`, `Edicao`, `refresh_nav`, `open_doc` |
 | `ribbon.rs` | Barra de título/QAT, separadores e grupos do ribbon |
 | `navegacao.rs` | Painel de navegação |
-| `area_trabalho.rs` | Separadores de documentos e vistas (folha de dados, formulário, relatório) |
-| `backstage.rs` | Separador Ficheiro |
+| `area_trabalho.rs` | Separadores de documentos e folha de dados (edição, `(Novo)`, eliminar, atualizar, linhas visíveis) |
+| `backstage.rs` | Separador Ficheiro: Informações, Recente, Novo; ações Abrir, Guardar Cópia Como, Fechar, Sair |
+| `db.rs` | Camada SQLite (`Database`, `TableData`): open/create/demo, catálogo, load, update/insert/delete, `VACUUM INTO`, compactar |
+| `ficheiro.rs` | Novo, abrir, guardar cópia, fechar, compactar (métodos de `AccessApp`) |
+| `recentes.rs` | Lista de recentes em `~/.config/accessql/recentes.txt` |
 | `menus.rs` | Menus pendentes |
 | `status.rs` | Barra de estado |
 | `tema.rs` | Paleta e constantes de cor |
@@ -48,7 +52,6 @@
 | `icones.rs` | Ícones desenhados em código |
 | `dados_exemplo.rs` | Dados fixos do mock (**a eliminar**) |
 
-A criar: `db.rs` (camada SQLite).
 
 ## 5. Decisões tomadas
 
@@ -57,6 +60,9 @@ A criar: `db.rs` (camada SQLite).
 - Objetos do painel de navegação: **Tabelas** e **Consultas**. As consultas guardadas são **`VIEW`s** do SQLite.
 - **Formulários e Relatórios ficam fora** da primeira versão (remover `Form`/`Report` de `ObjKind` e as vistas `form_view`/`report_view`).
 - Vistas: Folha de Dados, Estrutura, **SQL** (editor + resultados).
+- Ao arrancar não há base de dados aberta e o backstage abre em «Recente» (ou «Novo», se não houver recentes).
+- Recentes em `~/.config/accessql/recentes.txt` (máx. 10). Abrir recusa ficheiros que não sejam SQLite.
+- «Guardar» não existe: o SQLite grava cada alteração logo. «Guardar Cópia Como» usa `VACUUM INTO`.
 - Alterações menores são decididas dinamicamente à medida que o projeto avança.
 
 ## 6. Âmbito do ribbon (o que fica)
@@ -74,14 +80,16 @@ A criar: `db.rs` (camada SQLite).
 - Barra de título: «Base1 : Base de Dados SQLite - AccesSQL».
 - O ícone «A» vermelho mantém-se.
 
-## 8. Problemas conhecidos no código atual
+## 8. Problemas conhecidos
 
-1. `dataset(name)` devolve `&'static str` e é chamado a cada frame. Com SQLite tem de usar `String` e cache por documento.
-2. `OBJECTS` é constante e `nav_open: [bool; 4]` / `nav_sel` assumem 4 secções fixas. Têm de vir do catálogo da base de dados.
-3. `Doc` só tem `kind` e `name`. Falta guardar os dados carregados (colunas, linhas, estado de edição).
-4. A folha de dados desenha todas as linhas por frame. Passar a desenhar só as visíveis (`ScrollArea::show_viewport`).
-5. Pânico possível: `self.sel.1.min(cols.len() - 1)` rebenta com tabelas sem colunas.
-6. Não há edição de células. É preciso um `TextEdit` sobre a célula ativa e gravação por `UPDATE ... WHERE rowid = ?`.
+Resolvidos nos passos 1 e 2: dados fixos, `OBJECTS` constante, `Doc` sem dados, desenho de todas as linhas, pânico com 0 colunas/linhas, falta de edição.
+
+Em aberto:
+
+1. Os valores gravam-se como texto e o SQLite converte conforme a afinidade da coluna; não há validação até ao passo 5.
+2. O diálogo de ficheiros (`rfd`) pode não abrir na FreeBSD; se falhar, acrescentar um campo de caminho no backstage.
+3. Avisos de código não usado (ex.: `Icon::Form`, imports) e botões do ribbon ainda sem função: limpeza no passo 7.
+4. A base de dados de demonstração (em memória, via `dados_exemplo.rs`) é temporária; sai no passo 7.
 
 ## 9. Plano (ordem de trabalho)
 
@@ -98,12 +106,12 @@ A criar: `db.rs` (camada SQLite).
 - [x] Modelo visual completo e a correr (ribbon, navegação, folha de dados, backstage).
 - [x] Repositório no GitHub com histórico limpo (sem `target/`).
 - [x] Âmbito e decisões fechados (secções 5 e 6).
-- [~] `db.rs` e `rusqlite` no `Cargo.toml`: escrito, **por compilar** (ver sessão 2026-11-05 b).
-- [~] Painel de navegação ligado ao catálogo: escrito, por compilar.
-- [~] Folha de dados a ler de `TableData` (só leitura): escrita, por compilar.
-- [ ] Resto do plano (secção 9).
+- [x] Passo 1: `db.rs` + `rusqlite`, navegação ligada ao catálogo, folha de dados a ler (testado, tag `passo1`).
+- [x] Passo 2: edição de células, `(Novo)`, Eliminar com confirmação, Atualizar, linhas visíveis (testado, tag `passo2`).
+- [~] Passo 3: Ficheiro → Novo / Abrir / Guardar Cópia Como / Fechar / Recentes / Compactar: escrito, **por compilar**.
+- [ ] Passos 4 a 7 (secção 9). Antes do 4: ordenar, filtrar e procurar na folha de dados (`ORDER BY` / `WHERE`).
 
-**Próximo passo:** correr `cargo check` com o pacote do passo 1 e colar os erros. Depois, passo 2 (edição de células, linha `(Novo)`, só linhas visíveis). O Claude precisa de `area_trabalho.rs` e `estado.rs` atuais colados.
+**Próximo passo:** `cargo check` com o pacote do passo 3 e testar: criar ficheiro, editar, fechar, reabrir pelos Recentes, ver que os dados ficaram guardados.
 
 ## 11. Registo de sessões
 
@@ -111,3 +119,5 @@ _(Acrescentar uma linha por sessão: data, o que foi feito, ficheiros alterados,
 
 - 2026-11-05: análise do mock, definição de âmbito e decisões, criação deste ficheiro. Sem alterações ao código.
 - 2026-11-05 b: passo 1 escrito (sem compilar). Novo `db.rs` (SQLite, base de demonstração em memória com `Clientes`/`Encomendas`/`Produtos` + 2 `VIEW`s); `estado.rs` (`NavGroup`, `Doc.data`, `refresh_nav`, `open_doc` carrega da BD; `ObjKind` só `Table`/`Query`); `navegacao.rs` lê o catálogo; `area_trabalho.rs` (datasheet lê `TableData`, removidos `form_view`/`report_view`, corrigido pânico com 0 colunas/0 linhas); `status.rs`; `ribbon.rs` (título AccesSQL); `main.rs`; `Cargo.toml` (nome `accessql`, `rusqlite`). Por fazer: `cargo check`, depois passo 2.
+- 2026-11-05 c: passo 2 escrito (sem compilar). `db.rs` (rowid, update/insert/delete/fetch_row, `ID INTEGER PRIMARY KEY` na demo); `estado.rs` (`Edicao`, `scroll_sel`, `confirm_del`, `Doc.data` sem `Rc`); `area_trabalho.rs` (nova `datasheet` com edição, teclado, linhas visíveis, cabeçalho fixo; `gravar_celula`, `novo_registo`, `pedir_eliminar`, `dialogo_eliminar`, `recarregar_doc`); `ribbon.rs` (Registos ligado); `navegacao.rs` e `area_trabalho.rs` (ids dos campos de texto); `app.rs`. Por testar: edição, Tab/Enter, `(Novo)`, Eliminar.
+- 2026-11-05 d: passos 1 e 2 compilados, testados e guardados no git (tags `passo1`, `passo2`). Passo 3 escrito (sem compilar): `db.rs` (`open`/`create`/`copy_to`/`compact`, erros em português), `ficheiro.rs` e `recentes.rs` (novos), `backstage.rs` reescrito (Informações reais, Recente, Novo com pasta e demo), `estado.rs` (`db_file`, `recentes`, `new_db_dir`; arranca sem BD e com o backstage aberto), `ribbon.rs` (título «AccesSQL» sem BD), `main.rs`. Por testar tudo isto.

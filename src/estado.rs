@@ -1,4 +1,5 @@
 use eframe::egui::{self, Color32, FontId, Rect, Response, Stroke, Ui, Vec2};
+use std::path::PathBuf;
 use crate::{db::{Database, TableData}, icones::*, tema::*, widgets::*};
 // ───────────────────────────── Estado da aplicação ─────────────────────────────
 #[derive(Clone, Copy, PartialEq)]
@@ -40,6 +41,9 @@ pub(crate) struct AccessApp {
     pub(crate) bs_page: usize,
     pub(crate) nav_filter: String,
     pub(crate) db: Option<Database>,
+    pub(crate) db_file: Option<PathBuf>,
+    pub(crate) recentes: Vec<PathBuf>,
+    pub(crate) new_db_dir: String,
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) nav_open: [bool; 2],
     pub(crate) nav_sel: Option<(usize, usize)>,
@@ -66,17 +70,18 @@ impl AccessApp {
         style.visuals.widgets.active.weak_bg_fill = PRESS_FILL;
         style.visuals.selection.bg_fill = rgb(0xCFE0F7);
         cc.egui_ctx.set_style(style);
-        let (db, err) = match Database::demo() {
-            Ok(d) => (Some(d), String::new()),
-            Err(e) => (None, format!("Erro ao criar a base de dados de demonstração: {}", e)),
-        };
+        let recentes = crate::recentes::carregar();
+        let bs_page = if recentes.is_empty() { 2 } else { 1 };
         let mut app = Self {
-            db,
+            db: None,
+            db_file: None,
+            recentes,
+            new_db_dir: crate::ficheiro::pasta_inicial(),
             nav: Vec::new(),
             tab: 0,
             tab_x: (0.0, 0.0),
-            backstage: false,
-            bs_page: 0,
+            backstage: true,
+            bs_page,
             nav_filter: String::new(),
             nav_open: [true; 2],
             nav_sel: None,
@@ -86,17 +91,13 @@ impl AccessApp {
             dropdown: None,
             rec_search: String::new(),
             new_db_name: "Base1.accsql".into(),
-            db_path: "Demonstração".into(),
-            msg: err,
+            db_path: String::new(),
+            msg: String::new(),
             edit: None,
             scroll_sel: false,
             confirm_del: None,
         };
         app.refresh_nav();
-        app.open_doc(ObjKind::Table, "Clientes".into());
-        if app.db.is_some() {
-            app.msg.clear();
-        }
         app
     }
 
