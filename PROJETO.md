@@ -45,6 +45,7 @@
 | `area_trabalho.rs` | Separadores de documentos e folha de dados (edição, `(Novo)`, eliminar, atualizar, linhas visíveis) |
 | `backstage.rs` | Separador Ficheiro: Informações, Recente, Novo; ações Abrir, Guardar Cópia Como, Fechar, Sair |
 | `db.rs` | Camada SQLite (`Database`, `TableData`): open/create/demo, catálogo, load, update/insert/delete, `VACUUM INTO`, compactar |
+| `estrutura.rs` | Vista Estrutura: ver campos de uma tabela, acrescentar/renomear/eliminar campos, desenhar e criar tabelas novas; botão «Vista» que alterna folha de dados/estrutura |
 | `consulta.rs` | Vista SQL: editor, executar (F5/Ctrl+Enter), resultados, guardar como `VIEW`, abrir `VIEW` para editar |
 | `ficheiro.rs` | Novo, abrir, guardar cópia, fechar, compactar (métodos de `AccessApp`) |
 | `recentes.rs` | Lista de recentes em `~/.config/accessql/recentes.txt` |
@@ -63,6 +64,7 @@
 - Objetos do painel de navegação: **Tabelas** e **Consultas**. As consultas guardadas são **`VIEW`s** do SQLite.
 - **Formulários e Relatórios ficam fora** da primeira versão (remover `Form`/`Report` de `ObjKind` e as vistas `form_view`/`report_view`).
 - Vistas: Folha de Dados, Estrutura, **SQL** (editor + resultados).
+- Vista Estrutura: tabela nova = grelha editável (nome, tipo, obrigatório, valor por omissão, chave primária) + «Criar Tabela» (uma chave primária INTEGER fica numerada automaticamente; várias chaves viram `PRIMARY KEY (a, b)`). Tabela existente = campos só de leitura com Renomear, Eliminar (confirmação) e «Acrescentar campo» (campo obrigatório exige valor por omissão; não se acrescentam chaves primárias). Mudar tipo/restrições de um campo existente NÃO é suportado (exigiria recriar a tabela).
 - Vista SQL: um separador por consulta («Consulta1», …). Scripts com várias instruções são executados em sequência (sem transação própria); mostra-se o resultado da última que devolve linhas (máx. 100000). «Guardar como Consulta» cria uma `VIEW` (só `SELECT`); se o separador já veio de uma consulta guardada, substitui-a sem perguntar. Consultas e resultados SQL não têm linha `(Novo)` e não são editáveis.
 - Folha de dados: clicar no seletor de registo (coluna esquerda) seleciona o registo; Delete elimina (com confirmação). Com uma célula selecionada, Delete limpa-a, Backspace ou F2/Enter/escrever editam. Ctrl+setas = primeiro/último registo e campo.
 - Ao arrancar não há base de dados aberta e o backstage abre em «Recente» (ou «Novo», se não houver recentes).
@@ -115,10 +117,11 @@ Em aberto:
 - [x] Passo 2: edição de células, `(Novo)`, Eliminar com confirmação, Atualizar, linhas visíveis (testado, tag `passo2`).
 - [x] Passo 3: Ficheiro → Novo / Abrir / Guardar Cópia Como / Fechar / Recentes / Compactar (compilado e testado: criar, abrir, guardar cópia, erros, persistência).
 - [x] Passo 3b: seletor de registo, Delete, menu de contexto, teclado da grelha, Compactar no ribbon (testado; tag `passo3` no GitHub).
-- [~] Passo 4: Vista SQL (Criar → Consulta SQL / Tabela com modelo; executar scripts; resultados só de leitura; Guardar como Consulta = `VIEW`; menu de contexto «Vista SQL» nas consultas): escrito, **por compilar**.
-- [ ] Passos 5 a 7 (secção 9). Também por fazer: ordenar, filtrar e procurar na folha de dados (`ORDER BY` / `WHERE`).
+- [x] Passo 4: Vista SQL (Criar → Consulta SQL / Tabela com modelo; scripts; resultados só de leitura; Guardar como Consulta = `VIEW`; «Vista SQL» no menu de contexto das consultas) e correção do teclado (IME). Testado.
+- [~] Passo 5: Vista Estrutura (Criar → Estrutura da Tabela; botão «Vista» no ribbon; menu de contexto «Vista Estrutura» nas tabelas; acrescentar/renomear/eliminar campos com `ALTER TABLE`): escrito, **por compilar**.
+- [ ] Passos 6 e 7 (secção 9). Também por fazer: ordenar, filtrar e procurar na folha de dados (`ORDER BY` / `WHERE`).
 
-**Próximo passo:** `touch src/*.rs` + `cargo run` com o pacote do passo 4 e testar (ver registo de sessões). **Pendente:** Backspace/setas dentro do editor de célula (diagnóstico com `ACCESSQL_DEBUG=1`).
+**Próximo passo:** `touch src/*.rs` + `cargo run` com o pacote do passo 5 e testar (ver registo de sessões). Depois: ordenar/filtrar/procurar na folha de dados; mudar tipo/obrigatório/valor por omissão de um campo existente (exige recriar a tabela e copiar os dados, por isso fica à parte); validação na folha de dados.
 
 ## 11. Registo de sessões
 
@@ -135,3 +138,5 @@ _(Acrescentar uma linha por sessão: data, o que foi feito, ficheiros alterados,
 - 2026-11-06: passo 3 guardado no git (tag `passo3`; commit de `PROJETO.md` na raiz; `*.accsql` no `.gitignore`). Passo 4 escrito (sem compilar): `db.rs` (`executar`, `dividir`, `view_sql`, `guardar_vista`, `ler` partilhado, `ResultadoSql`, `TableData.truncado`), `consulta.rs` (novo), `estado.rs` (`ObjKind::Sql`, campos `sql`/`info`/`vista` em `Doc`, `pedir_nome`, `n_consulta`), `area_trabalho.rs` (sem `(Novo)` em vistas, `record_bar` com `novo`), `navegacao.rs` (menu «Vista SQL»), `ribbon.rs` (Criar reduzido a Tabela e Consulta SQL), `status.rs`, `app.rs`, `ficheiro.rs`, `main.rs`.
 - 2026-11-06 b: passo 4 testado: «Guardar como Consulta» só aceita `SELECT` (por desenho: uma `VIEW` não pode ser um `INSERT`). Backspace e setas continuam sem funcionar nos editores de texto. Passo 4b = `app.rs` com diagnóstico global (`ACCESSQL_DEBUG=1` mostra na barra de estado todas as teclas e texto que chegam ao egui). Passo 4 commitado em `main` (2d63c04); falta `git tag passo4` e `git push`.
 - 2026-11-06 c: causa do Backspace/setas encontrada (XIM/IME). Passo 4c = `app.rs` com `ctx.output_mut(|o| o.ime = None)` no fim do `update` (mais o diagnóstico `ACCESSQL_DEBUG`). Por testar: Backspace e setas no editor SQL e nas células; acentos.
+- 2026-11-06 d: passo 4 testado e a funcionar, incluindo Backspace e setas (correção do IME). Falta só `git commit` + `git tag passo4` + `git push` do pacote 4c.
+- 2026-11-06 e: passo 4 guardado no git (a tag `passo4` apontava ao commit antigo; `git tag -f passo4` + `git push --force origin passo4`). Passo 5 escrito (sem compilar): `db.rs` (`Campo`, `TIPOS`, `info_tabela`, `criar_tabela`, `acrescentar_campo`, `renomear_campo`, `eliminar_campo`), `estrutura.rs` (novo), `estado.rs` (`ObjKind::Design`, `Doc.estr`, `n_tabela`), `consulta.rs`, `status.rs`, `ficheiro.rs`, `area_trabalho.rs`, `navegacao.rs` (menu «Vista Estrutura»), `ribbon.rs` (grupo Vistas com botão que alterna; Criar → «Estrutura da Tabela»), `main.rs`.

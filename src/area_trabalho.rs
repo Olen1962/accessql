@@ -79,6 +79,7 @@ impl AccessApp {
             match kind {
                 ObjKind::Table | ObjKind::Query => self.datasheet(ui, &name),
                 ObjKind::Sql => self.sql_view(ui),
+                ObjKind::Design => self.estrutura_view(ui),
             }
         });
     }
@@ -552,7 +553,7 @@ impl AccessApp {
         self.refresh_nav();
         let Some(doc) = self.docs.get(self.active) else { return };
         let (nome, kind) = (doc.name.clone(), doc.kind);
-        if kind == ObjKind::Sql {
+        if kind == ObjKind::Sql || kind == ObjKind::Design {
             return;
         }
         match self.db.as_ref().map(|d| d.load(&nome, kind == ObjKind::Table)) {

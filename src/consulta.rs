@@ -20,6 +20,7 @@ impl AccessApp {
             info: String::new(),
             info_erro: false,
             vista: None,
+            estr: None,
         });
         self.active = self.docs.len() - 1;
         self.sel = (0, 1);
@@ -49,6 +50,7 @@ impl AccessApp {
             info: String::new(),
             info_erro: false,
             vista: Some(nome.to_string()),
+            estr: None,
         });
         self.active = self.docs.len() - 1;
         self.sel = (0, 1);

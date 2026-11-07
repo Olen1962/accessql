@@ -17,6 +17,19 @@ pub(crate) struct TableData {
     pub(crate) truncado: bool,
 }
 
+/// Um campo (coluna) de uma tabela, tal como aparece na Vista Estrutura.
+#[derive(Clone, Default)]
+pub(crate) struct Campo {
+    pub(crate) nome: String,
+    pub(crate) tipo: String,
+    pub(crate) obrigatorio: bool,
+    pub(crate) omissao: String,
+    pub(crate) pk: bool,
+}
+
+/// Tipos de dados oferecidos (nomes declarados do SQLite).
+pub(crate) const TIPOS: [&str; 8] = ["TEXT", "INTEGER", "REAL", "NUMERIC", "DATE", "DATETIME", "BOOLEAN", "BLOB"];
+
 /// Máximo de linhas mostradas no resultado de uma consulta SQL.
 const LIMITE_SQL: usize = 100_000;
 
@@ -214,6 +227,44 @@ fn corpo_vista(sql: &str) -> String {
         i += 1;
     }
     sql.to_string()
+}
+
+/// Valor por omissão escrito pelo utilizador -> literal SQL.
+fn literal_omissao(t: &str) -> String {
+    let t = t.trim();
+    let up = t.to_ascii_uppercase();
+    if matches!(up.as_str(), "NULL" | "CURRENT_TIMESTAMP" | "CURRENT_DATE" | "CURRENT_TIME" | "TRUE" | "FALSE") {
+        return up;
+    }
+    if t.chars().all(|c| c.is_ascii_digit() || "+-.eE".contains(c)) && t.parse::<f64>().is_ok() {
+        return t.to_string();
+    }
+    format!("'{}'", t.replace('\'', "''"))
+}
+
+/// Definição SQL de uma coluna: `"nome" TIPO [PRIMARY KEY] [NOT NULL] [DEFAULT x]`.
+fn definicao(c: &Campo, pk_inline: bool) -> String {
+    let mut s = format!("{} {}", quote(c.nome.trim()), c.tipo);
+    if pk_inline {
+        s.push_str(" PRIMARY KEY");
+    }
+    if c.obrigatorio {
+        s.push_str(" NOT NULL");
+    }
+    if !c.omissao.trim().is_empty() {
+        s.push_str(&format!(" DEFAULT {}", literal_omissao(&c.omissao)));
+    }
+    s
+}
+
+fn validar_campo(c: &Campo) -> Result<(), String> {
+    if c.nome.trim().is_empty() {
+        return Err("Todos os campos precisam de um nome".into());
+    }
+    if !TIPOS.contains(&c.tipo.as_str()) {
+        return Err(format!("Tipo de dados desconhecido no campo «{}»", c.nome.trim()));
+    }
+    Ok(())
 }
 
 impl Database {
@@ -430,5 +481,97 @@ impl Database {
         let sql = format!("DELETE FROM {} WHERE rowid = ?1", quote(tabela));
         self.conn.execute(&sql, params![rowid])?;
         Ok(())
+    }
+
+    /// Campos de uma tabela e o texto `CREATE TABLE` original.
+    pub(crate) fn info_tabela(&self, nome: &str) -> Result<(Vec<Campo>, String), String> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("PRAGMA table_info({})", quote(nome)))
+            .map_err(traduz)?;
+        let campos = stmt
+            .query_map([], |r| {
+                Ok(Campo {
+                    nome: r.get::<_, String>(1)?,
+                    tipo: r.get::<_, String>(2)?,
+                    obrigatorio: r.get::<_, i64>(3)? != 0,
+                    omissao: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                    pk: r.get::<_, i64>(5)? > 0,
+                })
+            })
+            .map_err(traduz)?
+            .collect::<rusqlite::Result<Vec<Campo>>>()
+            .map_err(traduz)?;
+        let sql: String = self
+            .conn
+            .query_row("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1", [nome], |r| r.get(0))
+            .unwrap_or_default();
+        Ok((campos, sql))
+    }
+
+    /// Cria uma tabela nova a partir da Vista Estrutura.
+    pub(crate) fn criar_tabela(&self, nome: &str, campos: &[Campo]) -> Result<(), String> {
+        let nome = nome.trim();
+        if nome.is_empty() {
+            return Err("Indique um nome para a tabela".into());
+        }
+        if campos.is_empty() {
+            return Err("A tabela precisa de pelo menos um campo".into());
+        }
+        let mut vistos: Vec<String> = Vec::new();
+        for c in campos {
+            validar_campo(c)?;
+            let k = c.nome.trim().to_lowercase();
+            if vistos.contains(&k) {
+                return Err(format!("O campo «{}» está repetido", c.nome.trim()));
+            }
+            vistos.push(k);
+        }
+        let existe: i64 = self
+            .conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = ?1 COLLATE NOCASE AND type IN ('table', 'view')",
+                [nome],
+                |r| r.get(0),
+            )
+            .map_err(traduz)?;
+        if existe > 0 {
+            return Err(format!("Já existe um objeto com o nome «{}»", nome));
+        }
+        let pks: Vec<&Campo> = campos.iter().filter(|c| c.pk).collect();
+        let inline = pks.len() == 1 && pks[0].tipo == "INTEGER";
+        let mut defs: Vec<String> = campos.iter().map(|c| definicao(c, inline && c.pk)).collect();
+        if !pks.is_empty() && !inline {
+            let lista: Vec<String> = pks.iter().map(|c| quote(c.nome.trim())).collect();
+            defs.push(format!("PRIMARY KEY ({})", lista.join(", ")));
+        }
+        let sql = format!("CREATE TABLE {} (\n  {}\n)", quote(nome), defs.join(",\n  "));
+        self.conn.execute_batch(&sql).map_err(traduz)
+    }
+
+    pub(crate) fn acrescentar_campo(&self, tabela: &str, c: &Campo) -> Result<(), String> {
+        validar_campo(c)?;
+        if c.pk {
+            return Err("Não é possível acrescentar uma chave primária a uma tabela existente".into());
+        }
+        if c.obrigatorio && c.omissao.trim().is_empty() {
+            return Err("Um campo obrigatório precisa de um valor por omissão ao ser acrescentado a uma tabela existente".into());
+        }
+        let sql = format!("ALTER TABLE {} ADD COLUMN {}", quote(tabela), definicao(c, false));
+        self.conn.execute_batch(&sql).map_err(traduz)
+    }
+
+    pub(crate) fn renomear_campo(&self, tabela: &str, de: &str, para: &str) -> Result<(), String> {
+        let para = para.trim();
+        if para.is_empty() {
+            return Err("Indique o novo nome do campo".into());
+        }
+        let sql = format!("ALTER TABLE {} RENAME COLUMN {} TO {}", quote(tabela), quote(de), quote(para));
+        self.conn.execute_batch(&sql).map_err(traduz)
+    }
+
+    pub(crate) fn eliminar_campo(&self, tabela: &str, campo: &str) -> Result<(), String> {
+        let sql = format!("ALTER TABLE {} DROP COLUMN {}", quote(tabela), quote(campo));
+        self.conn.execute_batch(&sql).map_err(traduz)
     }
 }

@@ -5,6 +5,7 @@ mod dados_exemplo;
 mod db;
 mod ficheiro;
 mod consulta;
+mod estrutura;
 mod recentes;
 mod estado;
 mod ribbon;

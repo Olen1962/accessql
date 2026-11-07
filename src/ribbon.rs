@@ -94,7 +94,7 @@ impl AccessApp {
             });
     }
     pub(crate) fn ribbon_base(&mut self, ui: &mut Ui) {
-        group(ui, "Vistas", |ui| self.rb(ui, Icon::Table, "Vista", Some("vista")));
+        self.grupo_vistas(ui);
         group(ui, "Área de Transferência", |ui| {
             self.rb(ui, Icon::Paste, "Colar", Some("colar"));
             self.stack(ui, &[
@@ -165,7 +165,10 @@ impl AccessApp {
     }
     pub(crate) fn ribbon_criar(&mut self, ui: &mut Ui) {
         group(ui, "Tabelas", |ui| {
-            if big_btn(ui, Icon::Table, "Tabela", false).clicked() {
+            if big_btn(ui, Icon::Table, "Estrutura\nda Tabela", false).clicked() {
+                self.nova_tabela_design();
+            }
+            if big_btn(ui, Icon::Table, "Tabela\n(SQL)", false).clicked() {
                 self.nova_consulta_sql("CREATE TABLE nova_tabela (\n    id INTEGER PRIMARY KEY,\n    nome TEXT\n);");
             }
         });
@@ -217,7 +220,7 @@ impl AccessApp {
         });
     }
     pub(crate) fn ribbon_folha(&mut self, ui: &mut Ui) {
-        group(ui, "Vistas", |ui| self.rb(ui, Icon::Table, "Vista", Some("vista")));
+        self.grupo_vistas(ui);
         group(ui, "Campos e Colunas", |ui| {
             self.rb(ui, Icon::Badge("+", C_GREEN), "Novo\nCampo", None);
             self.rb(ui, Icon::Table, "Adicionar Campos\nExistentes", None);

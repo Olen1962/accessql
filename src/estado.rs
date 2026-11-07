@@ -7,6 +7,7 @@ pub(crate) enum ObjKind {
     Table,
     Query,
     Sql,
+    Design,
 }
 impl ObjKind {
     pub(crate) fn icon(self) -> Icon {
@@ -14,6 +15,7 @@ impl ObjKind {
             ObjKind::Table => Icon::Table,
             ObjKind::Query => Icon::Query,
             ObjKind::Sql => Icon::Badge("S", C_BLUE),
+            ObjKind::Design => Icon::Badge("E", C_GREEN),
         }
     }
 }
@@ -34,6 +36,8 @@ pub(crate) struct Doc {
     pub(crate) info_erro: bool,
     /// Nome da consulta guardada (VIEW) a que este separador corresponde.
     pub(crate) vista: Option<String>,
+    /// Estado da Vista Estrutura (só nos separadores de estrutura).
+    pub(crate) estr: Option<crate::estrutura::Estrutura>,
 }
 
 /// Célula da folha de dados que está a ser editada.
@@ -70,6 +74,7 @@ pub(crate) struct AccessApp {
     pub(crate) row_sel: bool,
     pub(crate) pedir_nome: Option<String>,
     pub(crate) n_consulta: usize,
+    pub(crate) n_tabela: usize,
 }
 impl AccessApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -111,6 +116,7 @@ impl AccessApp {
             row_sel: false,
             pedir_nome: None,
             n_consulta: 0,
+            n_tabela: 0,
         };
         app.refresh_nav();
         app
@@ -170,7 +176,7 @@ impl AccessApp {
                     return;
                 }
             };
-            self.docs.push(Doc { kind, name, data, sql: String::new(), info: String::new(), info_erro: false, vista: None });
+            self.docs.push(Doc { kind, name, data, sql: String::new(), info: String::new(), info_erro: false, vista: None, estr: None });
             self.active = self.docs.len() - 1;
         }
         self.sel = (0, 1);
