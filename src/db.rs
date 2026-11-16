@@ -89,14 +89,78 @@ fn linha(r: &Row, de: usize, ate: usize) -> rusqlite::Result<Vec<String>> {
     Ok(v)
 }
 
+/// Operadores dos filtros da folha de dados.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Op {
+    Igual,
+    Diferente,
+    Contem,
+    NaoContem,
+}
+
+/// Uma condição de filtro sobre uma coluna.
+#[derive(Clone)]
+pub(crate) struct Condicao {
+    pub(crate) col: String,
+    pub(crate) op: Op,
+    pub(crate) valor: String,
+}
+
+fn escapar_like(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
+impl Condicao {
+    pub(crate) fn descricao(&self) -> String {
+        let v = if self.valor.is_empty() { "(vazio)".to_string() } else { self.valor.clone() };
+        match self.op {
+            Op::Igual => format!("{} = «{}»", self.col, v),
+            Op::Diferente => format!("{} ≠ «{}»", self.col, v),
+            Op::Contem => format!("{} contém «{}»", self.col, v),
+            Op::NaoContem => format!("{} não contém «{}»", self.col, v),
+        }
+    }
+
+    /// Texto SQL da condição; os valores vão em `params` (um `?` por valor).
+    fn sql(&self, params: &mut Vec<String>) -> String {
+        let c = quote(&self.col);
+        match self.op {
+            Op::Igual => {
+                if self.valor.is_empty() {
+                    format!("({c} IS NULL OR CAST({c} AS TEXT) = '')")
+                } else {
+                    params.push(self.valor.clone());
+                    format!("CAST({c} AS TEXT) = ?")
+                }
+            }
+            Op::Diferente => {
+                if self.valor.is_empty() {
+                    format!("({c} IS NOT NULL AND CAST({c} AS TEXT) <> '')")
+                } else {
+                    params.push(self.valor.clone());
+                    format!("({c} IS NULL OR CAST({c} AS TEXT) <> ?)")
+                }
+            }
+            Op::Contem => {
+                params.push(format!("%{}%", escapar_like(&self.valor)));
+                format!("CAST({c} AS TEXT) LIKE ? ESCAPE '\\'")
+            }
+            Op::NaoContem => {
+                params.push(format!("%{}%", escapar_like(&self.valor)));
+                format!("({c} IS NULL OR CAST({c} AS TEXT) NOT LIKE ? ESCAPE '\\')")
+            }
+        }
+    }
+}
+
 /// Lê o resultado de uma instrução já preparada (ignora as primeiras `skip` colunas).
-fn ler(stmt: &mut Statement, skip: usize, com_rowid: bool, limite: usize) -> rusqlite::Result<TableData> {
+fn ler(stmt: &mut Statement, skip: usize, com_rowid: bool, limite: usize, params: &[String]) -> rusqlite::Result<TableData> {
     let total = stmt.column_count();
     let nomes: Vec<String> = stmt.column_names().into_iter().skip(skip).map(String::from).collect();
     let mut rows_out: Vec<Vec<String>> = Vec::new();
     let mut rowids: Vec<i64> = Vec::new();
     let mut truncado = false;
-    let mut rows = stmt.query([])?;
+    let mut rows = stmt.query(params_from_iter(params.iter()))?;
     while let Some(r) = rows.next()? {
         if rows_out.len() >= limite {
             truncado = true;
@@ -362,22 +426,48 @@ impl Database {
     /// Lê uma tabela ou consulta para memória. Em tabelas lê também o `rowid`
     /// (necessário para editar); se não houver `rowid` fica só de leitura.
     pub(crate) fn load(&self, name: &str, tabela: bool) -> rusqlite::Result<TableData> {
+        self.load_filtrado(name, tabela, None, &[])
+    }
+
+    /// Como `load`, com ordenação (`coluna`, `ascendente`) e filtros opcionais.
+    pub(crate) fn load_filtrado(
+        &self,
+        name: &str,
+        tabela: bool,
+        ordem: Option<(&str, bool)>,
+        filtros: &[Condicao],
+    ) -> rusqlite::Result<TableData> {
         if tabela {
-            if let Ok(d) = self.load_inner(name, true) {
+            if let Ok(d) = self.load_inner(name, true, ordem, filtros) {
                 return Ok(d);
             }
         }
-        self.load_inner(name, false)
+        self.load_inner(name, false, ordem, filtros)
     }
 
-    fn load_inner(&self, name: &str, com_rowid: bool) -> rusqlite::Result<TableData> {
-        let sql = if com_rowid {
+    fn load_inner(
+        &self,
+        name: &str,
+        com_rowid: bool,
+        ordem: Option<(&str, bool)>,
+        filtros: &[Condicao],
+    ) -> rusqlite::Result<TableData> {
+        let mut sql = if com_rowid {
             format!("SELECT rowid, * FROM {}", quote(name))
         } else {
             format!("SELECT * FROM {}", quote(name))
         };
+        let mut params: Vec<String> = Vec::new();
+        if !filtros.is_empty() {
+            let conds: Vec<String> = filtros.iter().map(|f| f.sql(&mut params)).collect();
+            sql.push_str(" WHERE ");
+            sql.push_str(&conds.join(" AND "));
+        }
+        if let Some((col, asc)) = ordem {
+            sql.push_str(&format!(" ORDER BY {} COLLATE NOCASE {}", quote(col), if asc { "ASC" } else { "DESC" }));
+        }
         let mut stmt = self.conn.prepare(&sql)?;
-        ler(&mut stmt, if com_rowid { 1 } else { 0 }, com_rowid, usize::MAX)
+        ler(&mut stmt, if com_rowid { 1 } else { 0 }, com_rowid, usize::MAX, &params)
     }
 
     /// Executa um script SQL (uma ou mais instruções). Mostra o resultado da última
@@ -395,7 +485,7 @@ impl Database {
             let erro = |e: rusqlite::Error| format!("Instrução {}: {}", n, traduz(e));
             let mut stmt = self.conn.prepare(s).map_err(erro)?;
             if stmt.column_count() > 0 {
-                res.dados = Some(ler(&mut stmt, 0, false, LIMITE_SQL).map_err(erro)?);
+                res.dados = Some(ler(&mut stmt, 0, false, LIMITE_SQL, &[]).map_err(erro)?);
             } else {
                 res.afetadas += stmt.execute([]).map_err(erro)?;
             }
@@ -573,5 +663,91 @@ impl Database {
     pub(crate) fn eliminar_campo(&self, tabela: &str, campo: &str) -> Result<(), String> {
         let sql = format!("ALTER TABLE {} DROP COLUMN {}", quote(tabela), quote(campo));
         self.conn.execute_batch(&sql).map_err(traduz)
+    }
+
+    /// Muda o nome de uma tabela (`ALTER TABLE ... RENAME TO`) ou de uma consulta
+    /// (o SQLite não tem `ALTER VIEW`: recria-se a `VIEW` com o novo nome).
+    pub(crate) fn renomear_objeto(&self, tabela: bool, de: &str, para: &str) -> Result<(), String> {
+        let para = para.trim();
+        if para.is_empty() {
+            return Err("Indique o novo nome".into());
+        }
+        if !para.eq_ignore_ascii_case(de) {
+            let existe: i64 = self
+                .conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE name = ?1 COLLATE NOCASE AND type IN ('table', 'view')",
+                    [para],
+                    |r| r.get(0),
+                )
+                .map_err(traduz)?;
+            if existe > 0 {
+                return Err(format!("Já existe um objeto com o nome «{}»", para));
+            }
+        }
+        if tabela {
+            let sql = format!("ALTER TABLE {} RENAME TO {}", quote(de), quote(para));
+            self.conn.execute_batch(&sql).map_err(traduz)
+        } else {
+            let corpo = self.view_sql(de)?;
+            let script = format!(
+                "BEGIN;\nDROP VIEW {};\nCREATE VIEW {} AS {}\n;\nCOMMIT;",
+                quote(de),
+                quote(para),
+                corpo
+            );
+            if let Err(e) = self.conn.execute_batch(&script) {
+                let _ = self.conn.execute_batch("ROLLBACK;");
+                return Err(traduz(e));
+            }
+            Ok(())
+        }
+    }
+
+    /// Insere linhas numa tabela, numa só transação (tudo ou nada).
+    /// `mapa`: (coluna do ficheiro, campo de destino, campo numérico).
+    pub(crate) fn inserir_linhas(
+        &self,
+        tabela: &str,
+        mapa: &[(usize, String, bool)],
+        linhas: &[Vec<String>],
+        virgula: bool,
+    ) -> Result<usize, String> {
+        if mapa.is_empty() {
+            return Err("Nenhuma coluna do ficheiro corresponde a campos da tabela".into());
+        }
+        let cols: Vec<String> = mapa.iter().map(|m| quote(&m.1)).collect();
+        let marcas = vec!["?"; mapa.len()].join(", ");
+        let sql = format!("INSERT INTO {} ({}) VALUES ({})", quote(tabela), cols.join(", "), marcas);
+        let tx = self.conn.unchecked_transaction().map_err(traduz)?;
+        let mut n = 0usize;
+        {
+            let mut stmt = tx.prepare(&sql).map_err(traduz)?;
+            for (k, l) in linhas.iter().enumerate() {
+                let vals: Vec<Value> = mapa
+                    .iter()
+                    .map(|(ci, _, num)| {
+                        let v = l.get(*ci).map(|s| s.as_str()).unwrap_or("");
+                        if v.trim().is_empty() {
+                            Value::Null
+                        } else if *num {
+                            let t = v.trim();
+                            Value::Text(if virgula { t.replace(',', ".") } else { t.to_string() })
+                        } else {
+                            Value::Text(v.to_string())
+                        }
+                    })
+                    .collect();
+                stmt.execute(params_from_iter(vals.iter()))
+                    .map_err(|e| format!("Linha {} de dados: {}", k + 1, traduz(e)))?;
+                n += 1;
+            }
+        }
+        tx.commit().map_err(traduz)?;
+        Ok(n)
+    }
+
+    pub(crate) fn eliminar_tabela(&self, nome: &str) -> Result<(), String> {
+        self.conn.execute_batch(&format!("DROP TABLE {}", quote(nome))).map_err(traduz)
     }
 }

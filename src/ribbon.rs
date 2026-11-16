@@ -1,5 +1,5 @@
 use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
-use crate::{dados_exemplo::*, estado::*, icones::*, tema::*, widgets::*};
+use crate::{dados_exemplo::*, db::Op, estado::*, icones::*, tema::*, widgets::*};
 impl AccessApp {
 // ───────────── Barra de título / Acesso Rápido ─────────────
     pub(crate) fn qat(&mut self, ctx: &egui::Context) {
@@ -104,17 +104,34 @@ impl AccessApp {
             ]);
         });
         group(ui, "Ordenar e Filtrar", |ui| {
-            self.rb(ui, Icon::Filter, "Filtro", None);
-            self.stack(ui, &[
-                (Icon::Badge("A", C_BLUE), "Ascendente", None),
-                (Icon::Badge("Z", C_BLUE), "Descendente", None),
-                (Icon::Badge("x", C_RED), "Remover Ordenação", None),
-            ]);
-            self.stack(ui, &[
-                (Icon::Filter, "Seleção", Some("sel")),
-                (Icon::Filter, "Avançadas", Some("avanc")),
-                (Icon::Filter, "Alternar Filtro", None),
-            ]);
+            if big_btn(ui, Icon::Filter, "Filtro", false).clicked() {
+                let pos = ui.ctx().pointer_latest_pos().unwrap_or(Pos2::new(300.0, 200.0));
+                self.abrir_menu_coluna(self.sel.1, pos);
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                if small_btn(ui, Icon::Badge("A", C_BLUE), "Ascendente", false).clicked() {
+                    self.ordenar(self.sel.1, true);
+                }
+                if small_btn(ui, Icon::Badge("Z", C_BLUE), "Descendente", false).clicked() {
+                    self.ordenar(self.sel.1, false);
+                }
+                if small_btn(ui, Icon::Badge("x", C_RED), "Remover Ordenação", false).clicked() {
+                    self.limpar_ordem();
+                }
+            });
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                if small_btn(ui, Icon::Filter, "Seleção", false).clicked() {
+                    self.filtrar_selecao(Op::Igual);
+                }
+                if small_btn(ui, Icon::Badge("x", C_RED), "Remover Filtros", false).clicked() {
+                    self.remover_todos_filtros();
+                }
+                if small_btn(ui, Icon::Filter, "Alternar Filtro", false).clicked() {
+                    self.alternar_filtro();
+                }
+            });
         });
         group(ui, "Registos", |ui| {
             if big_btn(ui, Icon::Badge("R", C_GREEN), "Atualizar\nTudo", false).clicked() {
@@ -139,12 +156,9 @@ impl AccessApp {
             ]);
         });
         group(ui, "Localizar", |ui| {
-            self.rb(ui, Icon::Badge("L", C_BLUE), "Localizar", None);
-            self.stack(ui, &[
-                (Icon::Badge("S", C_ORANGE), "Substituir", None),
-                (Icon::Badge("→", C_GRAY), "Ir Para", Some("goto")),
-                (Icon::Badge("▢", C_GRAY), "Selecionar", Some("selecionar")),
-            ]);
+            if big_btn(ui, Icon::Badge("L", C_BLUE), "Localizar", false).clicked() {
+                self.focar_busca = true;
+            }
         });
         group(ui, "Formatação de Texto", |ui| {
             ui.vertical(|ui| {
@@ -179,21 +193,15 @@ impl AccessApp {
         });
     }
     pub(crate) fn ribbon_externos(&mut self, ui: &mut Ui) {
-        group(ui, "Importar e Ligar", |ui| {
-            self.rb(ui, Icon::Badge("X", C_GREEN), "Folha de\nCálculo Excel", None);
-            self.rb(ui, Icon::Table, "Access", None);
-            self.rb(ui, Icon::Badge("S", C_BLUE), "Base de Dados\nSQLite", None);
-            self.rb(ui, Icon::Badge("D", C_GRAY), "Base de Dados\nODBC", None);
-            self.rb(ui, Icon::Badge("T", C_BLUE), "Ficheiro\nde Texto", None);
-            self.rb(ui, Icon::Badge("…", C_GRAY), "Mais", Some("imp_mais"));
+        group(ui, "Importar", |ui| {
+            if big_btn(ui, Icon::Badge("↓", C_BLUE), "Ficheiro\nCSV", false).clicked() {
+                self.pedir_importar_csv();
+            }
         });
         group(ui, "Exportar", |ui| {
-            self.rb(ui, Icon::Badge("X", C_GREEN), "Excel", None);
-            self.rb(ui, Icon::Badge("T", C_BLUE), "Ficheiro\nde Texto", None);
-            self.rb(ui, Icon::Badge("<>", C_ORANGE), "XML", None);
-            self.rb(ui, Icon::Badge("P", C_RED), "PDF ou\nXPS", None);
-            self.rb(ui, Icon::Badge("@", C_BLUE), "Correio\nEletrónico", None);
-            self.rb(ui, Icon::Badge("…", C_GRAY), "Mais", Some("exp_mais"));
+            if big_btn(ui, Icon::Badge("↑", C_ORANGE), "Ficheiro\nCSV", false).clicked() {
+                self.pedir_exportar_csv();
+            }
         });
     }
     pub(crate) fn ribbon_ferramentas(&mut self, ui: &mut Ui) {

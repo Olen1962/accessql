@@ -6,7 +6,8 @@ impl AccessApp {
         let mut to_open: Option<(ObjKind, String)> = None;
         let mut to_sql: Option<String> = None;
         let mut to_estr: Option<String> = None;
-        egui::SidePanel::left("nav")
+        let mut to_ren: Option<(ObjKind, String)> = None;
+        let nav_resp = egui::SidePanel::left("nav")
             .resizable(true)
             .default_width(230.0)
             .width_range(170.0..=420.0)
@@ -73,6 +74,10 @@ impl AccessApp {
                                     to_open = Some((kind, name.to_string()));
                                     ui.close_menu();
                                 }
+                                if ui.button("Mudar o Nome (F2)").clicked() {
+                                    to_ren = Some((kind, name.to_string()));
+                                    ui.close_menu();
+                                }
                                 if kind == ObjKind::Table && ui.button("Vista Estrutura").clicked() {
                                     to_estr = Some(name.to_string());
                                     ui.close_menu();
@@ -88,14 +93,21 @@ impl AccessApp {
                 let full = ui.max_rect();
                 ui.painter().line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0_f32, RIBBON_LINE));
             });
+        self.nav_rect = Some(nav_resp.response.rect);
         if let Some((k, n)) = to_open {
             self.open_doc(k, n);
+            self.foco_nav = false;
         }
         if let Some(n) = to_sql {
             self.abrir_vista_sql(&n);
+            self.foco_nav = false;
         }
         if let Some(n) = to_estr {
             self.abrir_estrutura(&n);
+            self.foco_nav = false;
+        }
+        if let Some((k, n)) = to_ren {
+            self.renomear_obj = Some((k, n.clone(), n));
         }
     }
 }

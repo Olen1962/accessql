@@ -1,5 +1,5 @@
 use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
-use crate::{db::TableData, estado::*, icones::*, tema::*, widgets::*};
+use crate::{db::{Condicao, Op, TableData}, estado::*, icones::*, tema::*, widgets::*};
 #[derive(Default)]
 struct Teclas {
     dx: i32,
@@ -12,6 +12,11 @@ struct Teclas {
     f2: bool,
     delete: bool,
     backspace: bool,
+    copiar: bool,
+    cortar: bool,
+    colar: Option<String>,
+    /// Ctrl+' : copiar o valor da célula de cima.
+    acima: bool,
     typed: String,
 }
 
@@ -86,6 +91,16 @@ impl AccessApp {
     pub(crate) fn datasheet(&mut self, ui: &mut Ui, _name: &str) {
         let mut data = std::mem::take(&mut self.docs[self.active].data);
         let tabela = self.docs[self.active].name.clone();
+        // ordenação, filtros e pesquisa (para os indicadores do cabeçalho e o realce)
+        let ordem_col: Option<(usize, bool)> = self.docs[self.active]
+            .ordem
+            .as_ref()
+            .and_then(|(c, a)| data.cols.iter().position(|x| &x.0 == c).map(|i| (i, *a)));
+        let cols_filtradas: Vec<bool> = {
+            let d = &self.docs[self.active];
+            data.cols.iter().map(|(n, _)| d.filtro_ativo && d.filtros.iter().any(|f| &f.col == n)).collect()
+        };
+        let termo = self.rec_search.trim().to_lowercase();
         let (rh, hh, sw) = (21.0_f32, 24.0_f32, 22.0_f32);
         let extra = 150.0_f32;
         let ncols = data.cols.len();
@@ -101,16 +116,14 @@ impl AccessApp {
 
         // ── teclado (quando não se está a editar) ──
         let mut scroll_to_sel = std::mem::take(&mut self.scroll_sel);
-        let digitando = ui.ctx().memory(|m| {
-            matches!(m.focused(), Some(id) if id == egui::Id::new("nav_filter") || id == egui::Id::new("rec_search") || id == egui::Id::new("sql_editor") || id == egui::Id::new("nome_consulta"))
-        });
+        let digitando = a_escrever(ui.ctx());
         if self.edit.is_some() {
             self.row_sel = false;
         }
         let mut commit: Option<(usize, usize, String, bool)> = None;
         // ações que precisam dos dados do documento: executadas só depois de os devolver
         let mut menu_act: Option<u8> = None;
-        if self.edit.is_none() && ncols > 0 && !digitando && self.confirm_del.is_none() {
+        if self.edit.is_none() && ncols > 0 && !digitando && self.confirm_del.is_none() && !self.foco_nav {
             let t = ui.input(|i| {
                 let mut t = Teclas::default();
                 t.ctrl = i.modifiers.command;
@@ -133,6 +146,15 @@ impl AccessApp {
                 t.f2 = i.key_pressed(egui::Key::F2) || i.key_pressed(egui::Key::Enter);
                 t.delete = i.key_pressed(egui::Key::Delete);
                 t.backspace = i.key_pressed(egui::Key::Backspace);
+                t.acima = i.modifiers.command && (i.key_pressed(egui::Key::Quote) || i.key_pressed(egui::Key::Minus));
+                for e in &i.events {
+                    match e {
+                        egui::Event::Copy => t.copiar = true,
+                        egui::Event::Cut => t.cortar = true,
+                        egui::Event::Paste(s) => t.colar = Some(s.clone()),
+                        _ => {}
+                    }
+                }
                 if !i.modifiers.command {
                     for e in &i.events {
                         if let egui::Event::Text(s) = e {
@@ -192,6 +214,37 @@ impl AccessApp {
                     self.row_sel = false;
                 }
                 scroll_to_sel = true;
+            } else if t.copiar || t.cortar {
+                // Ctrl+C / Ctrl+X: copia a célula (ou o registo todo, separado por tabuladores)
+                let (r, c) = self.sel;
+                if r < nrows {
+                    let texto = if self.row_sel { data.rows[r].join("\t") } else { data.rows[r][c.min(ncols - 1)].clone() };
+                    ui.ctx().copy_text(texto);
+                    if t.cortar && editable && !self.row_sel {
+                        commit = Some((r, c, String::new(), false));
+                    }
+                }
+            } else if let Some(txt) = &t.colar {
+                // Ctrl+V: cola na célula selecionada (só o primeiro valor, se vierem vários)
+                if editable && !self.row_sel {
+                    let (r, c) = self.sel;
+                    let primeira = txt.lines().next().unwrap_or("");
+                    let valor = primeira.split('\t').next().unwrap_or("").to_string();
+                    if txt.trim_end_matches(['\r', '\n']).contains(['\t', '\n']) {
+                        self.msg = "Colado só o primeiro valor do texto copiado".into();
+                    }
+                    commit = Some((r, c, valor, false));
+                }
+            } else if t.acima {
+                // Ctrl+': copia o valor da mesma coluna no registo de cima
+                let (r, c) = self.sel;
+                if !editable || self.row_sel {
+                    self.msg = "Selecione uma célula para copiar o valor de cima".into();
+                } else if r == 0 {
+                    self.msg = "Não há nenhum registo acima".into();
+                } else if let Some(v) = data.rows.get(r - 1).and_then(|row| row.get(c)).cloned() {
+                    commit = Some((r, c, v, false));
+                }
             } else if t.delete {
                 if self.row_sel {
                     menu_act = Some(2);
@@ -219,6 +272,7 @@ impl AccessApp {
         let row_sel = self.row_sel;
         let mut hit: Option<(usize, usize, bool)> = None;
         let mut gutter_hit: Option<usize> = None;
+        let mut header_hit: Option<(usize, bool, Pos2)> = None;
         {
             let cols = &data.cols;
             let rows = &data.rows;
@@ -261,6 +315,9 @@ impl AccessApp {
                     let mut cx = o.x + sw;
                     for (ci, (_, w)) in cols.iter().enumerate() {
                         let cell = Rect::from_min_size(Pos2::new(cx, y), Vec2::new(*w, rh));
+                        if !termo.is_empty() && rows[ri][ci].to_lowercase().contains(&termo) {
+                            p.rect_filled(cell.shrink(1.0), 0.0, rgb(0xFFF2A8));
+                        }
                         p.with_clip_rect(cell.intersect(p.clip_rect())).text(
                             Pos2::new(cx + 6.0, y + rh / 2.0),
                             Align2::LEFT_CENTER,
@@ -295,6 +352,12 @@ impl AccessApp {
                             .frame(false)
                             .font(FontId::proportional(13.0));
                         let r = ui.put(ecell, te);
+                        // Ctrl+' durante a edição: traz o valor da mesma coluna do registo de cima
+                        if ui.input(|i| i.modifiers.command && (i.key_pressed(egui::Key::Quote) || i.key_pressed(egui::Key::Minus))) && ed.row > 0 {
+                            if let Some(v) = rows.get(ed.row - 1).and_then(|row| row.get(ed.col)).cloned() {
+                                ed.texto = v;
+                            }
+                        }
                         if std::env::var_os("ACCESSQL_DEBUG").is_some() {
                             // diagnóstico: que teclas chegam ao egui e se o editor tem o foco
                             let teclas = ui.input(|i| {
@@ -338,9 +401,23 @@ impl AccessApp {
                 p.rect_filled(Rect::from_min_size(Pos2::new(o.x, ty), Vec2::new(data_w, hh)), 0.0, rgb(0xF2F2F2));
                 p.rect_filled(Rect::from_min_size(Pos2::new(o.x, ty), Vec2::new(sw, hh)), 0.0, rgb(0xE9E9E9));
                 let mut x = o.x + sw;
-                for (label, w) in cols.iter() {
+                for (hi, (label, w)) in cols.iter().enumerate() {
                     let w = *w;
+                    if cols_filtradas.get(hi).copied().unwrap_or(false) {
+                        p.rect_filled(Rect::from_min_size(Pos2::new(x, ty), Vec2::new(w, hh)), 0.0, rgb(0xFBE3B0));
+                    }
                     p.text(Pos2::new(x + 6.0, ty + hh / 2.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), Color32::BLACK);
+                    if let Some((oc, asc)) = ordem_col {
+                        if oc == hi {
+                            let c = Pos2::new(x + w - 25.0, ty + hh / 2.0);
+                            let pts = if asc {
+                                [Pos2::new(c.x - 3.5, c.y + 2.0), Pos2::new(c.x + 3.5, c.y + 2.0), Pos2::new(c.x, c.y - 3.0)]
+                            } else {
+                                [Pos2::new(c.x - 3.5, c.y - 2.0), Pos2::new(c.x + 3.5, c.y - 2.0), Pos2::new(c.x, c.y + 3.0)]
+                            };
+                            tri(&p, pts, rgb(0x2B5A9E));
+                        }
+                    }
                     down_arrow(&p, Pos2::new(x + w - 11.0, ty + hh / 2.0), rgb(0x6A6A6A));
                     x += w;
                     p.line_segment([Pos2::new(x, ty), Pos2::new(x, ty + hh)], line);
@@ -375,10 +452,24 @@ impl AccessApp {
                 };
                 if resp.clicked() || resp.double_clicked() || resp.secondary_clicked() {
                     if let Some(pos) = resp.interact_pointer_pos() {
-                        match localizar(pos) {
-                            Some((ri, Some(ci))) => hit = Some((ri, ci, resp.double_clicked())),
-                            Some((ri, None)) => gutter_hit = Some(ri),
-                            None => {}
+                        if pos.y >= ty && pos.y <= ty + hh {
+                            // cabeçalho: a seta (ou o botão direito) abre o menu da coluna
+                            if pos.x > o.x + sw {
+                                let mut acc = o.x + sw;
+                                for (ci, (_, w)) in cols.iter().enumerate() {
+                                    if pos.x < acc + *w {
+                                        header_hit = Some((ci, resp.secondary_clicked() || pos.x > acc + *w - 22.0, pos));
+                                        break;
+                                    }
+                                    acc += *w;
+                                }
+                            }
+                        } else {
+                            match localizar(pos) {
+                                Some((ri, Some(ci))) => hit = Some((ri, ci, resp.double_clicked())),
+                                Some((ri, None)) => gutter_hit = Some(ri),
+                                None => {}
+                            }
                         }
                     }
                 }
@@ -390,6 +481,15 @@ impl AccessApp {
                         }
                         if ui.button("Eliminar Registo").clicked() {
                             menu_act = Some(2);
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("Filtrar por Seleção").clicked() {
+                            menu_act = Some(3);
+                            ui.close_menu();
+                        }
+                        if ui.button("Excluir Seleção").clicked() {
+                            menu_act = Some(4);
                             ui.close_menu();
                         }
                     });
@@ -424,9 +524,18 @@ impl AccessApp {
         let total = data.rows.len();
         self.docs[self.active].data = data;
         // só agora os dados voltaram ao documento
+        if let Some((ci, abrir, pos)) = header_hit {
+            self.sel.1 = ci;
+            self.row_sel = false;
+            if abrir {
+                self.abrir_menu_coluna(ci, Pos2::new(pos.x, pos.y + 8.0));
+            }
+        }
         match menu_act {
             Some(1) => self.novo_registo(),
             Some(2) => self.pedir_eliminar(),
+            Some(3) => self.filtrar_selecao(Op::Igual),
+            Some(4) => self.filtrar_selecao(Op::Diferente),
             _ => {}
         }
         self.record_bar(ui, total, novo == 1);
@@ -435,6 +544,10 @@ impl AccessApp {
     /// Grava uma célula (UPDATE) ou cria um registo novo (INSERT) na linha `(Novo)`.
     fn gravar_celula(&mut self, data: &mut TableData, tabela: &str, r: usize, c: usize, texto: String) {
         let Some(db) = self.db.as_ref() else { return };
+        let (ordem_f, filtros_f): (Option<(String, bool)>, Vec<Condicao>) = {
+            let d = &self.docs[self.active];
+            (d.ordem.clone(), if d.filtro_ativo { d.filtros.clone() } else { Vec::new() })
+        };
         let col = data.cols[c].0.clone();
         if r < data.rows.len() {
             if data.rows[r][c] == texto {
@@ -449,7 +562,7 @@ impl AccessApp {
                 Ok(Some(row)) => data.rows[r] = row,
                 _ => {
                     // a chave mudou (por exemplo, o campo ID): voltar a ler a tabela
-                    if let Ok(d) = db.load(tabela, true) {
+                    if let Ok(d) = db.load_filtrado(tabela, true, ordem_f.as_ref().map(|(c, a)| (c.as_str(), *a)), &filtros_f) {
                         *data = d;
                     }
                 }
@@ -465,7 +578,7 @@ impl AccessApp {
                         data.rowids.push(rid);
                     }
                     _ => {
-                        if let Ok(d) = db.load(tabela, true) {
+                        if let Ok(d) = db.load_filtrado(tabela, true, ordem_f.as_ref().map(|(c, a)| (c.as_str(), *a)), &filtros_f) {
                             *data = d;
                         }
                     }
@@ -556,14 +669,9 @@ impl AccessApp {
         if kind == ObjKind::Sql || kind == ObjKind::Design {
             return;
         }
-        match self.db.as_ref().map(|d| d.load(&nome, kind == ObjKind::Table)) {
-            Some(Ok(d)) => {
-                self.docs[self.active].data = d;
-                self.edit = None;
-                self.msg = format!("«{}» atualizada", nome);
-            }
-            Some(Err(e)) => self.msg = format!("Erro ao atualizar «{}»: {}", nome, e),
-            None => {}
+        if self.carregar_doc(self.active) {
+            self.edit = None;
+            self.msg = format!("«{}» atualizada", nome);
         }
     }
     pub(crate) fn record_bar(&mut self, ui: &mut Ui, total: usize, novo: bool) {
@@ -597,11 +705,31 @@ impl AccessApp {
                     self.sel.0 = total;
                 }
                 ui.add_space(8.0);
-                Frame::none().stroke(Stroke::new(1.0_f32, rgb(0xC0C0C0))).inner_margin(Margin::symmetric(8.0, 1.0)).show(ui, |ui| {
-                    ui.label(RichText::new("Sem Filtro").size(12.0).color(rgb(0x555555)));
-                });
+                let (n_filtros, ligado) = self.docs.get(self.active).map_or((0, false), |d| (d.filtros.len(), d.filtro_ativo));
+                let (rotulo, cor) = if n_filtros > 0 && ligado {
+                    ("Filtrado", rgb(0xB45F06))
+                } else {
+                    ("Sem Filtro", rgb(0x555555))
+                };
+                if ui
+                    .add_enabled(n_filtros > 0, egui::Button::new(RichText::new(rotulo).size(12.0).color(cor)))
+                    .on_hover_text("Liga ou desliga os filtros")
+                    .clicked()
+                {
+                    self.alternar_filtro();
+                }
                 ui.add_space(4.0);
-                ui.add(egui::TextEdit::singleline(&mut self.rec_search).id(egui::Id::new("rec_search")).hint_text("Procurar").desired_width(170.0));
+                let r = ui.add(egui::TextEdit::singleline(&mut self.rec_search).id(egui::Id::new("rec_search")).hint_text("Procurar").desired_width(170.0));
+                if std::mem::take(&mut self.focar_busca) {
+                    r.request_focus();
+                }
+                if r.changed() {
+                    self.buscar_texto(self.sel.0);
+                }
+                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    self.buscar_texto(self.sel.0 + 1);
+                    r.request_focus();
+                }
             });
         });
     }

@@ -3,7 +3,9 @@
 use crate::{
     db::{Campo, TIPOS},
     estado::*,
+    icones::Icon,
     tema::*,
+    widgets::{big_btn, group},
 };
 use eframe::egui::{self, RichText, Ui};
 
@@ -16,7 +18,11 @@ pub(crate) struct Estrutura {
     pub(crate) campos: Vec<Campo>,
     /// Texto `CREATE TABLE` original (só em tabelas existentes).
     pub(crate) sql: String,
+    /// Campo selecionado (o F2 muda-lhe o nome).
+    pub(crate) sel: Option<usize>,
     pub(crate) renomear: Option<(usize, String)>,
+    /// Pedir o foco para a caixa de texto do nome, no próximo desenho.
+    pub(crate) foco_ren: bool,
     pub(crate) eliminar: Option<usize>,
     /// Campo a acrescentar a uma tabela existente.
     pub(crate) novo: Campo,
@@ -49,15 +55,22 @@ enum Ac {
 }
 
 impl AccessApp {
-    /// Abre a estrutura de uma tabela existente.
+    /// Abre a estrutura de uma tabela. Se a tabela já estiver aberta como folha de
+    /// dados, o mesmo separador passa a mostrar a estrutura.
     pub(crate) fn abrir_estrutura(&mut self, nome: &str) {
-        if let Some(i) = self
-            .docs
-            .iter()
-            .position(|d| d.kind == ObjKind::Design && d.name == nome && d.estr.as_ref().map_or(false, |e| !e.nova))
-        {
-            self.active = i;
-            return;
+        let existente = self.procurar_objeto(nome);
+        if let Some(i) = existente {
+            match self.docs[i].kind {
+                ObjKind::Design => {
+                    self.active = i;
+                    return;
+                }
+                ObjKind::Table => {}
+                _ => {
+                    self.msg = "Só as tabelas têm Vista Estrutura".into();
+                    return;
+                }
+            }
         }
         let r = match self.db.as_ref() {
             Some(db) => db.info_tabela(nome),
@@ -66,7 +79,7 @@ impl AccessApp {
         match r {
             Ok((campos, sql)) => {
                 let est = Estrutura { campos, sql, novo: campo_texto(), ..Default::default() };
-                self.docs.push(Doc {
+                let doc = Doc {
                     kind: ObjKind::Design,
                     name: nome.to_string(),
                     data: Default::default(),
@@ -74,9 +87,22 @@ impl AccessApp {
                     info: String::new(),
                     info_erro: false,
                     vista: None,
+                    sql_orig: String::new(),
+                    ordem: None,
+                    filtros: Vec::new(),
+                    filtro_ativo: true,
                     estr: Some(est),
-                });
-                self.active = self.docs.len() - 1;
+                };
+                match existente {
+                    Some(i) => {
+                        self.docs[i] = doc;
+                        self.active = i;
+                    }
+                    None => {
+                        self.docs.push(doc);
+                        self.active = self.docs.len() - 1;
+                    }
+                }
                 self.edit = None;
                 self.row_sel = false;
             }
@@ -108,6 +134,10 @@ impl AccessApp {
             info: String::new(),
             info_erro: false,
             vista: None,
+            sql_orig: String::new(),
+            ordem: None,
+            filtros: Vec::new(),
+            filtro_ativo: true,
             estr: Some(est),
         });
         self.active = self.docs.len() - 1;
@@ -115,36 +145,42 @@ impl AccessApp {
         self.row_sel = false;
     }
 
-    /// Botão «Vista»: alterna entre a folha de dados e a estrutura da tabela.
+    /// Botão «Vista»: troca o modo do separador ativo (dados <-> estrutura, ou
+    /// dados <-> SQL nas consultas). O objeto continua com um só separador.
     pub(crate) fn alternar_vista(&mut self) {
         let info = self
             .docs
             .get(self.active)
-            .map(|d| (d.kind, d.name.clone(), d.estr.as_ref().map_or(false, |e| e.nova)));
+            .map(|d| (d.kind, d.name.clone(), d.estr.as_ref().map_or(false, |e| e.nova), d.vista.is_some()));
         match info {
-            Some((ObjKind::Table, n, _)) => self.abrir_estrutura(&n),
-            Some((ObjKind::Design, n, false)) => self.open_doc(ObjKind::Table, n),
-            Some((ObjKind::Design, _, true)) => self.msg = "Crie primeiro a tabela".into(),
-            _ => self.msg = "Esta vista só existe para tabelas".into(),
+            Some((ObjKind::Table, n, _, _)) => self.abrir_estrutura(&n),
+            Some((ObjKind::Design, n, false, _)) => self.open_doc(ObjKind::Table, n),
+            Some((ObjKind::Design, _, true, _)) => self.msg = "Crie primeiro a tabela".into(),
+            Some((ObjKind::Query, n, _, _)) => self.abrir_vista_sql(&n),
+            Some((ObjKind::Sql, n, _, true)) => self.open_doc(ObjKind::Query, n),
+            Some((ObjKind::Sql, _, _, false)) => self.msg = "Guarde a consulta para a poder ver como folha de dados".into(),
+            None => self.msg = "Não há nenhum separador aberto".into(),
         }
     }
 
     /// Grupo «Vistas» do ribbon.
     pub(crate) fn grupo_vistas(&mut self, ui: &mut Ui) {
-        let (rotulo, icone) = match self.docs.get(self.active).map(|d| d.kind) {
-            Some(ObjKind::Table) => ("Vista\nEstrutura", crate::icones::Icon::Badge("E", C_GREEN)),
-            Some(ObjKind::Design) => ("Vista Folha\nde Dados", crate::icones::Icon::Table),
-            _ => ("Vista", crate::icones::Icon::Table),
+        let (rotulo, icone) = match self.docs.get(self.active).map(|d| (d.kind, d.vista.is_some())) {
+            Some((ObjKind::Table, _)) => ("Vista\nEstrutura", Icon::Badge("E", C_GREEN)),
+            Some((ObjKind::Design, _)) => ("Vista Folha\nde Dados", Icon::Table),
+            Some((ObjKind::Query, _)) => ("Vista\nSQL", Icon::Badge("S", C_BLUE)),
+            Some((ObjKind::Sql, true)) => ("Vista Folha\nde Dados", Icon::Table),
+            _ => ("Vista", Icon::Table),
         };
-        crate::widgets::group(ui, "Vistas", |ui| {
-            if crate::widgets::big_btn(ui, icone, rotulo, false).clicked() {
+        group(ui, "Vistas", |ui| {
+            if big_btn(ui, icone, rotulo, false).clicked() {
                 self.alternar_vista();
             }
         });
     }
 
     /// Volta a ler as folhas de dados abertas de `tabela` (a estrutura mudou).
-    fn recarregar_abertos(&mut self, tabela: &str) {
+    pub(crate) fn recarregar_abertos(&mut self, tabela: &str) {
         let idx: Vec<usize> = self
             .docs
             .iter()
@@ -153,18 +189,34 @@ impl AccessApp {
             .map(|(i, _)| i)
             .collect();
         for i in idx {
-            if let Some(Ok(d)) = self.db.as_ref().map(|db| db.load(tabela, true)) {
-                self.docs[i].data = d;
-            }
+            self.carregar_doc(i);
         }
     }
 
     pub(crate) fn estrutura_view(&mut self, ui: &mut Ui) {
+        let f2 = !self.foco_nav && !a_escrever(ui.ctx()) && ui.input(|i| i.key_pressed(egui::Key::F2));
         let Some(mut est) = self.docs[self.active].estr.take() else {
             ui.label("Sem dados de estrutura.");
             return;
         };
         let tabela = self.docs[self.active].name.clone();
+        // F2: muda o nome do campo selecionado (ou vai para a caixa de texto do nome)
+        if f2 {
+            match (est.nova, est.sel) {
+                (false, Some(i)) if i < est.campos.len() => {
+                    est.renomear = Some((i, est.campos[i].nome.clone()));
+                    est.foco_ren = true;
+                }
+                (true, Some(i)) if i < est.campos.len() => {
+                    ui.memory_mut(|m| m.request_focus(egui::Id::new(("campo_nome", i))));
+                }
+                (true, None) => ui.memory_mut(|m| m.request_focus(egui::Id::new("nome_tabela"))),
+                _ => {}
+            }
+        }
+        if est.renomear.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            est.renomear = None;
+        }
         let mut ac: Option<Ac> = None;
         egui::ScrollArea::vertical().id_source("estr_scroll").auto_shrink([false, false]).show(ui, |ui| {
             ui.add_space(6.0);
@@ -172,12 +224,13 @@ impl AccessApp {
                 ui.horizontal(|ui| {
                     ui.add_space(8.0);
                     ui.label(RichText::new("Nome da tabela:").strong());
-                    ui.add(egui::TextEdit::singleline(&mut est.nome_tabela).desired_width(200.0));
+                    ui.add(egui::TextEdit::singleline(&mut est.nome_tabela).id(egui::Id::new("nome_tabela")).desired_width(200.0));
                 });
             } else {
                 ui.horizontal(|ui| {
                     ui.add_space(8.0);
                     ui.label(RichText::new(format!("Estrutura da tabela «{}»", tabela)).strong().size(15.0));
+                    ui.weak("  (F2 muda o nome do campo selecionado)");
                 });
             }
             ui.add_space(6.0);
@@ -207,8 +260,17 @@ impl AccessApp {
                     ui.end_row();
                     for (i, c) in est.campos.iter_mut().enumerate() {
                         if est.nova {
-                            ui.label(if c.pk { "🔑" } else { "" });
-                            ui.add(egui::TextEdit::singleline(&mut c.nome).desired_width(170.0));
+                            if ui.selectable_label(est.sel == Some(i), if c.pk { "🔑" } else { "▸" }).clicked() {
+                                est.sel = Some(i);
+                            }
+                            let r = ui.add(
+                                egui::TextEdit::singleline(&mut c.nome)
+                                    .id(egui::Id::new(("campo_nome", i)))
+                                    .desired_width(170.0),
+                            );
+                            if r.gained_focus() {
+                                est.sel = Some(i);
+                            }
                             combo_tipo(ui, ("tipo", i), &mut c.tipo);
                             ui.checkbox(&mut c.obrigatorio, "");
                             ui.add(egui::TextEdit::singleline(&mut c.omissao).desired_width(130.0));
@@ -222,10 +284,20 @@ impl AccessApp {
                             if a_renomear {
                                 let (ok, cancelar) = ui
                                     .horizontal(|ui| {
+                                        let mut enter = false;
                                         if let Some((_, t)) = est.renomear.as_mut() {
-                                            ui.add(egui::TextEdit::singleline(t).desired_width(120.0));
+                                            let r = ui.add(
+                                                egui::TextEdit::singleline(t)
+                                                    .id(egui::Id::new("renomear_campo"))
+                                                    .desired_width(120.0),
+                                            );
+                                            if est.foco_ren {
+                                                r.request_focus();
+                                                est.foco_ren = false;
+                                            }
+                                            enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                                         }
-                                        (ui.small_button("OK").clicked(), ui.small_button("✕").clicked())
+                                        (ui.small_button("OK").clicked() || enter, ui.small_button("✕").clicked())
                                     })
                                     .inner;
                                 if ok {
@@ -236,8 +308,8 @@ impl AccessApp {
                                 if cancelar {
                                     est.renomear = None;
                                 }
-                            } else {
-                                ui.label(&c.nome);
+                            } else if ui.selectable_label(est.sel == Some(i), &c.nome).clicked() {
+                                est.sel = Some(i);
                             }
                             ui.label(&c.tipo);
                             ui.label(if c.obrigatorio { "Sim" } else { "Não" });
@@ -245,9 +317,12 @@ impl AccessApp {
                             ui.label(if c.pk { "Sim" } else { "" });
                             ui.horizontal(|ui| {
                                 if ui.small_button("Renomear").clicked() {
+                                    est.sel = Some(i);
                                     est.renomear = Some((i, c.nome.clone()));
+                                    est.foco_ren = true;
                                 }
                                 if ui.small_button("Eliminar").clicked() {
+                                    est.sel = Some(i);
                                     est.eliminar = Some(i);
                                 }
                             });
@@ -270,7 +345,7 @@ impl AccessApp {
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     ui.add_space(8.0);
-                    ui.weak("Uma chave primária INTEGER é numerada automaticamente. Valor por omissão: número, texto, NULL ou CURRENT_TIMESTAMP.");
+                    ui.weak("Uma chave primária INTEGER é numerada automaticamente. Valor por omissão: número, texto, NULL ou CURRENT_TIMESTAMP. F2 vai para o nome do campo selecionado.");
                 });
             } else {
                 ui.horizontal(|ui| {
@@ -307,6 +382,7 @@ impl AccessApp {
                 if i < est.campos.len() {
                     est.campos.remove(i);
                 }
+                est.sel = None;
             }
             Some(Ac::Criar) => {
                 let nome = est.nome_tabela.trim().to_string();
@@ -319,6 +395,7 @@ impl AccessApp {
                         est.campos = campos;
                         est.sql = sql;
                         est.nova = false;
+                        est.sel = None;
                         est.info = format!("Tabela «{}» criada", nome);
                         est.info_erro = false;
                         self.docs[self.active].name = nome.clone();
@@ -388,6 +465,7 @@ impl AccessApp {
                         est.info_erro = false;
                         est.campos = campos;
                         est.sql = sql;
+                        est.sel = None;
                         self.recarregar_abertos(&tabela);
                     }
                     Some(Err(e)) => {

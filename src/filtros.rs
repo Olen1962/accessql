@@ -1,0 +1,297 @@
+//! Ordenar, filtrar e procurar na folha de dados.
+
+use crate::{
+    db::{Condicao, Op},
+    estado::*,
+    tema::*,
+};
+use eframe::egui::{self, Pos2, RichText};
+
+enum Ac {
+    Ordenar(bool),
+    LimparOrdem,
+    Filtro(Op),
+    Contem(bool),
+    RemoverFiltro(usize),
+    RemoverTodos,
+    Fechar,
+}
+
+fn abreviar(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        let t: String = s.chars().take(n).collect();
+        format!("{}…", t)
+    }
+}
+
+impl AccessApp {
+    /// Volta a ler o separador `i` (tabela ou consulta) com a ordenação e os filtros dele.
+    pub(crate) fn carregar_doc(&mut self, i: usize) -> bool {
+        let Some(doc) = self.docs.get(i) else { return false };
+        if !matches!(doc.kind, ObjKind::Table | ObjKind::Query) {
+            return false;
+        }
+        let nome = doc.name.clone();
+        let tabela = doc.kind == ObjKind::Table;
+        let ordem = doc.ordem.clone();
+        let filtros: Vec<Condicao> = if doc.filtro_ativo { doc.filtros.clone() } else { Vec::new() };
+        let (r, limpou) = {
+            let Some(db) = self.db.as_ref() else { return false };
+            match db.load_filtrado(&nome, tabela, ordem.as_ref().map(|(c, a)| (c.as_str(), *a)), &filtros) {
+                Ok(d) => (Ok(d), false),
+                // a coluna pode já não existir: tenta sem ordenação nem filtros
+                Err(_) if ordem.is_some() || !filtros.is_empty() => (db.load_filtrado(&nome, tabela, None, &[]), true),
+                Err(e) => (Err(e), false),
+            }
+        };
+        match r {
+            Ok(d) => {
+                let doc = &mut self.docs[i];
+                doc.data = d;
+                if limpou {
+                    doc.ordem = None;
+                    doc.filtros.clear();
+                    self.msg = format!("A ordenação e os filtros de «{}» já não se aplicam e foram retirados", nome);
+                }
+                true
+            }
+            Err(e) => {
+                self.msg = format!("Erro ao ler «{}»: {}", nome, e);
+                false
+            }
+        }
+    }
+
+    fn doc_de_dados(&mut self) -> Option<&mut Doc> {
+        match self.docs.get_mut(self.active) {
+            Some(d) if matches!(d.kind, ObjKind::Table | ObjKind::Query) => Some(d),
+            _ => {
+                self.msg = "Só se pode ordenar e filtrar numa folha de dados".into();
+                None
+            }
+        }
+    }
+
+    pub(crate) fn ordenar(&mut self, col: usize, asc: bool) {
+        let Some(doc) = self.doc_de_dados() else { return };
+        let Some(c) = doc.data.cols.get(col) else { return };
+        doc.ordem = Some((c.0.clone(), asc));
+        self.edit = None;
+        self.carregar_doc(self.active);
+    }
+
+    pub(crate) fn limpar_ordem(&mut self) {
+        let Some(doc) = self.doc_de_dados() else { return };
+        doc.ordem = None;
+        self.carregar_doc(self.active);
+    }
+
+    pub(crate) fn filtrar(&mut self, col: usize, op: Op, valor: String) {
+        let Some(doc) = self.doc_de_dados() else { return };
+        let Some(c) = doc.data.cols.get(col) else { return };
+        let cond = Condicao { col: c.0.clone(), op, valor };
+        if !doc.filtros.iter().any(|f| f.col == cond.col && f.op == cond.op && f.valor == cond.valor) {
+            doc.filtros.push(cond);
+        }
+        doc.filtro_ativo = true;
+        self.edit = None;
+        self.sel.0 = 0;
+        self.carregar_doc(self.active);
+    }
+
+    /// Filtra pela célula selecionada (igual ou diferente do valor dela).
+    pub(crate) fn filtrar_selecao(&mut self, op: Op) {
+        let col = self.sel.1;
+        let valor = match self.docs.get(self.active) {
+            Some(d) => d.data.rows.get(self.sel.0).and_then(|r| r.get(col)).cloned().unwrap_or_default(),
+            None => return,
+        };
+        self.filtrar(col, op, valor);
+    }
+
+    pub(crate) fn remover_filtros_coluna(&mut self, col: usize) {
+        let Some(doc) = self.doc_de_dados() else { return };
+        let Some(c) = doc.data.cols.get(col) else { return };
+        let nome = c.0.clone();
+        doc.filtros.retain(|f| f.col != nome);
+        self.carregar_doc(self.active);
+    }
+
+    pub(crate) fn remover_todos_filtros(&mut self) {
+        let Some(doc) = self.doc_de_dados() else { return };
+        doc.filtros.clear();
+        doc.filtro_ativo = true;
+        self.carregar_doc(self.active);
+    }
+
+    /// «Alternar Filtro»: liga ou desliga os filtros sem os perder.
+    pub(crate) fn alternar_filtro(&mut self) {
+        let Some(doc) = self.doc_de_dados() else { return };
+        if doc.filtros.is_empty() {
+            self.msg = "Não há nenhum filtro definido".into();
+            return;
+        }
+        doc.filtro_ativo = !doc.filtro_ativo;
+        self.edit = None;
+        self.carregar_doc(self.active);
+    }
+
+    fn remover_filtro_n(&mut self, n: usize) {
+        let Some(doc) = self.doc_de_dados() else { return };
+        if n < doc.filtros.len() {
+            doc.filtros.remove(n);
+        }
+        self.carregar_doc(self.active);
+    }
+
+    pub(crate) fn abrir_menu_coluna(&mut self, col: usize, pos: Pos2) {
+        self.menu_col = Some((col, pos));
+        self.menu_texto.clear();
+    }
+
+    /// Procura `rec_search` em todas as colunas, a partir da linha `a_partir_de`.
+    pub(crate) fn buscar_texto(&mut self, a_partir_de: usize) -> bool {
+        let t = self.rec_search.trim().to_lowercase();
+        if t.is_empty() {
+            return false;
+        }
+        let Some(doc) = self.docs.get(self.active) else { return false };
+        let n = doc.data.rows.len();
+        for k in 0..n {
+            let ri = (a_partir_de + k) % n;
+            if let Some(ci) = doc.data.rows[ri].iter().position(|c| c.to_lowercase().contains(&t)) {
+                self.sel = (ri, ci);
+                self.scroll_sel = true;
+                self.row_sel = false;
+                return true;
+            }
+        }
+        self.msg = format!("Não foi encontrado «{}»", self.rec_search.trim());
+        false
+    }
+
+    /// Menu da coluna: ordenar e filtrar. Abre-se na seta do cabeçalho ou no botão Filtro.
+    pub(crate) fn desenhar_menu_col(&mut self, ctx: &egui::Context) {
+        let Some((col, pos)) = self.menu_col else { return };
+        let Some(doc) = self.docs.get(self.active) else {
+            self.menu_col = None;
+            return;
+        };
+        let Some(nome_col) = doc.data.cols.get(col).map(|c| c.0.clone()) else {
+            self.menu_col = None;
+            return;
+        };
+        let valor_sel = doc.data.rows.get(self.sel.0).and_then(|r| r.get(col)).cloned().unwrap_or_default();
+        let filtros_col: Vec<(usize, String)> = doc
+            .filtros
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.col == nome_col)
+            .map(|(i, f)| (i, f.descricao()))
+            .collect();
+        let total_filtros = doc.filtros.len();
+        let ordenada = doc.ordem.as_ref().map_or(false, |(c, _)| *c == nome_col);
+        let vs = if valor_sel.is_empty() { "(vazio)".to_string() } else { abreviar(&valor_sel, 22) };
+        let mut ac: Option<Ac> = None;
+        let area = egui::Area::new(egui::Id::new("menu_col"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_min_width(240.0);
+                    ui.label(RichText::new(format!("Coluna «{}»", nome_col)).strong());
+                    ui.separator();
+                    if ui.button("Ordenar de A a Z (ascendente)").clicked() {
+                        ac = Some(Ac::Ordenar(true));
+                    }
+                    if ui.button("Ordenar de Z a A (descendente)").clicked() {
+                        ac = Some(Ac::Ordenar(false));
+                    }
+                    if ordenada && ui.button("Remover ordenação").clicked() {
+                        ac = Some(Ac::LimparOrdem);
+                    }
+                    ui.separator();
+                    if ui.button(format!("Filtrar: igual a «{}»", vs)).clicked() {
+                        ac = Some(Ac::Filtro(Op::Igual));
+                    }
+                    if ui.button(format!("Excluir: diferente de «{}»", vs)).clicked() {
+                        ac = Some(Ac::Filtro(Op::Diferente));
+                    }
+                    ui.horizontal(|ui| {
+                        let r = ui.add(
+                            egui::TextEdit::singleline(&mut self.menu_texto)
+                                .id(egui::Id::new("filtro_texto"))
+                                .hint_text("texto a procurar")
+                                .desired_width(120.0),
+                        );
+                        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if ui.button("Contém").clicked() || enter {
+                            ac = Some(Ac::Contem(true));
+                        }
+                        if ui.button("Não contém").clicked() {
+                            ac = Some(Ac::Contem(false));
+                        }
+                    });
+                    if !filtros_col.is_empty() {
+                        ui.separator();
+                        for (i, d) in &filtros_col {
+                            ui.horizontal(|ui| {
+                                ui.label(d);
+                                if ui.small_button("✕").on_hover_text("Remover este filtro").clicked() {
+                                    ac = Some(Ac::RemoverFiltro(*i));
+                                }
+                            });
+                        }
+                    }
+                    if total_filtros > 0 {
+                        ui.separator();
+                        if ui.button("Remover todos os filtros").clicked() {
+                            ac = Some(Ac::RemoverTodos);
+                        }
+                    }
+                });
+            });
+        // clicar fora do menu fecha-o
+        if ac.is_none() && ctx.input(|i| i.pointer.primary_pressed()) {
+            if let Some(p) = ctx.input(|i| i.pointer.interact_pos()) {
+                if !area.response.rect.contains(p) {
+                    ac = Some(Ac::Fechar);
+                }
+            }
+        }
+        match ac {
+            Some(Ac::Ordenar(a)) => {
+                self.menu_col = None;
+                self.ordenar(col, a);
+            }
+            Some(Ac::LimparOrdem) => {
+                self.menu_col = None;
+                self.limpar_ordem();
+            }
+            Some(Ac::Filtro(op)) => {
+                self.menu_col = None;
+                self.sel.1 = col;
+                self.filtrar(col, op, valor_sel);
+            }
+            Some(Ac::Contem(sim)) => {
+                let t = self.menu_texto.trim().to_string();
+                if !t.is_empty() {
+                    self.menu_col = None;
+                    self.filtrar(col, if sim { Op::Contem } else { Op::NaoContem }, t);
+                }
+            }
+            Some(Ac::RemoverFiltro(n)) => {
+                self.menu_col = None;
+                self.remover_filtro_n(n);
+            }
+            Some(Ac::RemoverTodos) => {
+                self.menu_col = None;
+                self.remover_todos_filtros();
+            }
+            Some(Ac::Fechar) => self.menu_col = None,
+            None => {}
+        }
+    }
+}

@@ -20,6 +20,10 @@ impl AccessApp {
             info: String::new(),
             info_erro: false,
             vista: None,
+            sql_orig: String::new(),
+            ordem: None,
+            filtros: Vec::new(),
+            filtro_ativo: true,
             estr: None,
         });
         self.active = self.docs.len() - 1;
@@ -28,11 +32,22 @@ impl AccessApp {
         self.row_sel = false;
     }
 
-    /// Abre o texto SQL de uma consulta guardada (VIEW) para a editar.
+    /// Abre o texto SQL de uma consulta guardada (VIEW) para a editar. Se a consulta
+    /// já estiver aberta como folha de dados, o mesmo separador passa a mostrar o SQL.
     pub(crate) fn abrir_vista_sql(&mut self, nome: &str) {
-        if let Some(i) = self.docs.iter().position(|d| d.kind == ObjKind::Sql && d.vista.as_deref() == Some(nome)) {
-            self.active = i;
-            return;
+        let existente = self.procurar_objeto(nome);
+        if let Some(i) = existente {
+            match self.docs[i].kind {
+                ObjKind::Sql => {
+                    self.active = i;
+                    return;
+                }
+                ObjKind::Query => {}
+                _ => {
+                    self.msg = "Só as consultas têm Vista SQL".into();
+                    return;
+                }
+            }
         }
         let sql = match self.db.as_ref().map(|d| d.view_sql(nome)) {
             Some(Ok(s)) => s,
@@ -42,17 +57,30 @@ impl AccessApp {
             }
             None => return,
         };
-        self.docs.push(Doc {
+        let doc = Doc {
             kind: ObjKind::Sql,
             name: nome.to_string(),
             data: TableData::default(),
-            sql,
+            sql: sql.clone(),
             info: String::new(),
             info_erro: false,
             vista: Some(nome.to_string()),
+            sql_orig: sql,
+            ordem: None,
+            filtros: Vec::new(),
+            filtro_ativo: true,
             estr: None,
-        });
-        self.active = self.docs.len() - 1;
+        };
+        match existente {
+            Some(i) => {
+                self.docs[i] = doc;
+                self.active = i;
+            }
+            None => {
+                self.docs.push(doc);
+                self.active = self.docs.len() - 1;
+            }
+        }
         self.sel = (0, 1);
         self.edit = None;
         self.row_sel = false;
@@ -121,6 +149,7 @@ impl AccessApp {
                 let doc = &mut self.docs[self.active];
                 doc.vista = Some(nome.clone());
                 doc.name = nome.clone();
+                doc.sql_orig = doc.sql.clone();
                 doc.info = format!("Consulta «{}» guardada", nome);
                 doc.info_erro = false;
                 self.msg = doc.info.clone();
