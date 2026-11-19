@@ -55,7 +55,7 @@
 | `csvio.rs` | Dados Externos: importar CSV (separador e codificação detetados, tabela nova ou acrescentar) e exportar CSV |
 | `filtros.rs` | Ordenar, filtrar e procurar na folha de dados: ordenação e filtros por separador, menu da coluna, procura em memória |
 | `renomear.rs` | Mudar o nome de tabelas e consultas (F2 no painel de navegação): diálogo e atualização dos separadores abertos |
-| `estrutura.rs` | Vista Estrutura: ver campos de uma tabela, acrescentar/renomear/eliminar campos, desenhar e criar tabelas novas; botão «Vista» que alterna folha de dados/estrutura |
+| `estrutura.rs` | Vista Estrutura: ver campos de uma tabela, acrescentar/renomear/eliminar/alterar campos, desenhar e criar tabelas novas; botão «Vista» que alterna folha de dados/estrutura |
 | `consulta.rs` | Vista SQL: editor, executar (F5/Ctrl+Enter), resultados, guardar como `VIEW`, abrir `VIEW` para editar |
 | `ficheiro.rs` | Novo, abrir, guardar cópia, fechar, compactar (métodos de `AccessApp`) |
 | `recentes.rs` | Lista de recentes em `~/.config/accessql/recentes.txt` |
@@ -63,8 +63,7 @@
 | `status.rs` | Barra de estado |
 | `tema.rs` | Paleta e constantes de cor |
 | `widgets.rs` | Botões grandes/pequenos, grupos do ribbon |
-| `icones.rs` | Ícones desenhados em código |
-| `dados_exemplo.rs` | Dados fixos do mock (**a eliminar**) |
+| `icones.rs` | Ícones desenhados em código, incluindo o símbolo próprio do AccesSQL (`Icon::Logo`) |
 
 
 ## 5. Decisões tomadas
@@ -75,7 +74,7 @@
 - **Formulários e Relatórios ficam fora** da primeira versão (remover `Form`/`Report` de `ObjKind` e as vistas `form_view`/`report_view`).
 - Vistas: Folha de Dados, Estrutura, **SQL** (editor + resultados).
 - Eliminar tabelas e consultas: confirmação com o nome, o n.º de registos e aviso de que não se anula; **bloqueia-se só a tabela referida** por chaves estrangeiras de outras (a tabela que guarda a relação pode ser eliminada, e com ela a relação), mesmo com a integridade desligada; avisa das consultas que mencionam o objeto (não bloqueia). Delete no painel de navegação ou «Eliminar» no menu de contexto. Fecha os separadores do objeto e limpa o histórico de desfazer.
-- Integridade referencial: `PRAGMA foreign_keys = ON` ao abrir, criar ou ter a base de demonstração; a janela «Relações» tem um interruptor (vale só para a sessão). Chaves estrangeiras escolhem-se no campo «Refere a» (só chaves primárias simples) ao desenhar uma tabela nova ou ao acrescentar um campo; usam `REFERENCES tabela(campo)` na definição do campo. Não é possível acrescentar relações a campos que já existem (exigiria recriar a tabela). O erro `FOREIGN KEY constraint failed` é traduzido.
+- Integridade referencial: `PRAGMA foreign_keys = ON` ao abrir ou criar uma base; a janela «Relações» tem um interruptor (vale só para a sessão). Chaves estrangeiras escolhem-se no campo «Refere a» (só chaves primárias simples) ao desenhar uma tabela nova ou ao acrescentar um campo; usam `REFERENCES tabela(campo)` na definição do campo. Não é possível acrescentar relações a campos que já existem (exigiria recriar a tabela). O erro `FOREIGN KEY constraint failed` é traduzido.
 - Cada objeto (tabela ou consulta) tem **um só separador**. O botão «Vista» e o menu de contexto trocam o modo no mesmo separador: tabela = dados <-> estrutura; consulta guardada = dados <-> SQL. Abrir (duplo clique) uma tabela já aberta só a ativa, ou volta ao modo de dados. Se uma consulta tem alterações de SQL por guardar, não se muda de vista (pede-se para guardar).
 - Desfazer/Refazer: cada gravação vai para `hist_pend`; `fechar_passo` junta tudo o que se fez numa operação (uma colagem grande desfaz-se de uma vez). Guardam-se os valores brutos do SQLite (inclui BLOB e NULL). O histórico (máx. 200 passos) limpa-se ao fechar/abrir a base de dados, executar SQL que altere dados, mudar a estrutura, mudar o nome de objetos e importar CSV. Não há «Colar» no ribbon: o egui só entrega o texto da área de transferência com Ctrl+V.
 - Folha de dados, células: Ctrl+C copia a célula (ou o registo inteiro, em texto separado por tabuladores, se estiver selecionado pelo seletor); Ctrl+X copia e limpa; Ctrl+V cola: na linha `(Novo)` cada linha de texto cria um registo novo (um registo inteiro copiado da grelha duplica-se com ID novo: o campo INTEGER PRIMARY KEY não é escrito); nos registos existentes os valores substituem as células a partir da selecionada (com o registo selecionado, a partir da 1.ª coluna), e linhas a mais que a tabela são ignoradas; Ctrl+' copia o valor da mesma coluna no registo de cima, com a célula selecionada ou durante a edição. Delete limpa a célula (NULL).
@@ -83,7 +82,7 @@
 - Validação ao gravar: antes de `UPDATE`/`INSERT`, colagem ou importação CSV, o valor é verificado contra o tipo declarado e a obrigatoriedade da coluna (`PRAGMA table_info` → `TableData.tipos`/`obrig`). Inteiros, reais (com `.` ou `,`), Sim/Não e datas (`AAAA-MM-DD` ou `DD/MM/AAAA`, com validação de dias e anos bissextos) exigem formato válido; `TEXT`, `BLOB` e tipos personalizados aceitam texto livre. Um erro invalida toda a colagem/importação, que não grava nada. `UNIQUE`, `CHECK` e chaves estrangeiras continuam a ser validados pelo SQLite.
 - Ordenar e filtrar: por separador (`Doc.ordem`, `Doc.filtros`, `filtro_ativo`); a ordenação usa `ORDER BY col COLLATE NOCASE`; filtros acumulam com AND (igual, diferente, contém, não contém; vazio = NULL ou ''). Menu da coluna: clique na seta do cabeçalho, botão direito no cabeçalho, ou botão «Filtro» do ribbon. O cabeçalho mostra ▲/▼ na coluna ordenada e fica laranja nas filtradas. «Procurar» (barra de registos) é uma procura em memória nas linhas carregadas, com realce; Enter = seguinte.
 - F2: quem o recebe depende do último clique (`foco_nav`): no painel de navegação muda o nome da tabela/consulta selecionada; na folha de dados edita a célula; na Vista Estrutura muda o nome do campo selecionado (ou vai para a caixa do nome, numa tabela nova). Ignorado enquanto se escreve numa caixa de texto conhecida (`a_escrever`).
-- Vista Estrutura: tabela nova = grelha editável (nome, tipo, obrigatório, valor por omissão, chave primária) + «Criar Tabela» (uma chave primária INTEGER fica numerada automaticamente; várias chaves viram `PRIMARY KEY (a, b)`). Tabela existente = campos só de leitura com Renomear, Eliminar (confirmação) e «Acrescentar campo» (campo obrigatório exige valor por omissão; não se acrescentam chaves primárias). Mudar tipo/restrições de um campo existente NÃO é suportado (exigiria recriar a tabela).
+- Vista Estrutura: tabela nova = grelha editável (nome, tipo, obrigatório, valor por omissão, chave primária) + «Criar Tabela» (uma chave primária INTEGER fica numerada automaticamente; várias chaves viram `PRIMARY KEY (a, b)`). Tabela existente = campos com Renomear, **Alterar** (tipo, obrigatório e valor por omissão, com confirmação), Eliminar (confirmação) e «Acrescentar campo» (campo obrigatório exige valor por omissão; não se acrescentam chaves primárias). Alterar um campo existente recria a tabela dentro de uma transação (`Database::alterar_campo`): copia todos os dados, recria índices e gatilhos, preserva ações ON DELETE/ON UPDATE, o nome da tabela e as vistas; se algo falhar, nada muda. Campos com valor vazio impedem torná-los obrigatórios. Em bases criadas fora do AccesSQL, restrições `CHECK`/`UNIQUE` inline e chaves primárias com `AUTOINCREMENT` podem não sobreviver à recriação (o catálogo não as devolve; ver secção 8).
 - Vista SQL: um separador por consulta («Consulta1», …). Scripts com várias instruções são executados em sequência (sem transação própria); mostra-se o resultado da última que devolve linhas (máx. 100000). «Guardar como Consulta» cria uma `VIEW` (só `SELECT`); se o separador já veio de uma consulta guardada, substitui-a sem perguntar. Consultas e resultados SQL não têm linha `(Novo)` e não são editáveis.
 - Folha de dados: clicar no seletor de registo (coluna esquerda) seleciona o registo; Delete elimina (com confirmação). Com uma célula selecionada, Delete limpa-a, Backspace ou F2/Enter/escrever editam. Ctrl+setas = primeiro/último registo e campo.
 - Ao arrancar não há base de dados aberta e o backstage abre em «Recente» (ou «Novo», se não houver recentes).
@@ -98,15 +97,16 @@
 - **Criar**: Tabela, Estrutura da Tabela, Consulta SQL. Saem: Modelos, Partes da Aplicação, Formulários, Relatórios, Macros e Código.
 - **Dados Externos**: Importar CSV, Exportar CSV. Saem: Excel, Outlook, dBASE, XML, HTML, Word.
 - **Ferramentas de Bases de Dados**: Relações (chaves estrangeiras), Índices, Compactar e Reparar (`VACUUM` + `integrity_check`). Saem: Documentador, Analisador, Mover Dados.
-- **Folha de Dados** (separador contextual): Novo campo, Eliminar campo, Renomear. A validação de tipos e `NOT NULL` é automática ao gravar; `UNIQUE`, `CHECK` e relações ficam a cargo do SQLite. «Tipo de Dados» e a alteração de campos existentes ficam para uma fase posterior.
+- **Folha de Dados** (separador contextual): Novo campo, Eliminar campo, Renomear. A validação de tipos e `NOT NULL` é automática ao gravar; `UNIQUE`, `CHECK` e relações ficam a cargo do SQLite. O tipo e a alteração de campos existentes tratam-se na Vista Estrutura.
 
 ## 7. Identidade (a aplicar)
 
 - Título da janela: **AccesSQL**. `with_app_id("accessql")`.
 - Barra de título: «Base1 : Base de Dados SQLite - AccesSQL».
-- O ícone «A» vermelho mantém-se (substituir por ícone próprio: pendente).
+- Ícone próprio: cilindro de base de dados azul desenhado em código (`Icon::Logo` em `icones.rs`), usado na barra de acesso rápido no lugar do «A» vermelho. Não se usa imagem nem marca do Access.
+- Nome mantido: **AccesSQL**. Decisão de 2026-11-19: o nome está consolidado no repositório, no binário e em `~/.config/accessql`; mudá-lo agora traria risco e pouca vantagem. A distinção face ao Access faz-se pelo ícone próprio e pela nota de não afiliação no `README.md`. Se o utilizador pedir outro nome, a mudança é pontual.
 - `README.md` com descrição, compilação na FreeBSD e nota de não afiliação à Microsoft.
-- Licença **GPL-3.0-or-later**, texto oficial em `LICENSE`. Ícone e nome mais distinto: em aberto.
+- Licença **GPL-3.0-or-later**, texto oficial em `LICENSE`.
 
 ## 8. Problemas conhecidos
 
@@ -116,8 +116,9 @@ Em aberto:
 
 1. Resolvido: os valores entram como texto e o SQLite converte pela afinidade, mas agora há validação prévia de tipo/formato (`validacao.rs`).
 2. O diálogo de ficheiros (`rfd`) pode não abrir na FreeBSD; se falhar, acrescentar um campo de caminho no backstage.
-3. Avisos de código não usado (ex.: `Icon::Form`, imports) e botões do ribbon ainda sem função: limpeza no passo 7.
-4. A base de dados de demonstração (em memória, via `dados_exemplo.rs`) é temporária; sai no passo 7.
+3. Resolvido: avisos de código não usado e botões sem função removidos; `cargo check` sem avisos.
+4. Resolvido: a base de demonstração e `dados_exemplo.rs` foram removidos (dados em memória não eram gravados).
+5. Ao alterar um campo de uma tabela criada fora do AccesSQL, restrições `CHECK`/`UNIQUE` inline e `AUTOINCREMENT` podem perder-se: `PRAGMA table_info` não as devolve e a tabela é recriada a partir dos campos conhecidos. O SQLite verifica a integridade no fim; para bases com essas restrições, convém confirmar a definição SQL antes de aplicar.
 
 ## 9. Plano (ordem de trabalho)
 
@@ -151,8 +152,14 @@ Em aberto:
 - [x] Passo 7d: eliminar tabelas e consultas (confirmação, bloqueio por relações, aviso de consultas afetadas). Compilado; teste manual da janela pendente.
 - [x] Validação ao gravar: `validacao.rs` (tipos, obrigatório, datas, Sim/Não), ligada à edição de células, colagem e importação CSV; 6 testes unitários (`cargo test`).
 - [x] Limpeza de controlos sem função (Ajuda, Guardar, cartão «Base de Dados em Branco» agora ligado, cabeçalho de navegação, «Clique para Adicionar») e de código morto; `cargo check` sem avisos.
+- [x] Identidade e licença: `README.md`, `LICENSE` (GPL-3.0-or-later), push de `main` e da tag `passo7`.
+- [x] Ícone próprio (`Icon::Logo`) no lugar do «A» vermelho; nome mantido como AccesSQL por decisão registada.
+- [x] Alterar tipo/obrigatório/omissão de campos existentes: `Database::alterar_campo` (recriação transacional) + botão «Alterar» na Vista Estrutura; 3 testes unitários.
+- [x] Remoção da base de demonstração: `Database::demo()`, `abrir_demo()`, cartão do backstage e `dados_exemplo.rs`.
 
-**Próximo passo:** testar na interface a eliminação de objetos, a validação (gravar/colar/importar) e a cópia de segurança atómica. Depois: mudar tipo/obrigatório/omissão de campos existentes, remover a base de demonstração, identidade e licença.
+- [x] Build release: `cargo build --release --locked` concluído; `target/release/accessql` (ELF FreeBSD x86-64, 22 MB).
+
+**Próximo passo:** pedir teste manual na interface (ícone, botão «Alterar» na estrutura e criação de base em branco) e fazer commit/push finais.
 
 ## 11. Registo de sessões
 
@@ -183,3 +190,4 @@ _(Acrescentar uma linha por sessão: data, o que foi feito, ficheiros alterados,
 - 2026-11-07 g: passos 7b e 7c testados (tudo bem). Passo 7d escrito (sem compilar): `eliminar_obj.rs` (novo), `db.rs` (`contar_registos`, `consultas_que_mencionam`, `eliminar_objeto`), `navegacao.rs` (menu «Eliminar (Delete)»), `app.rs` (Delete no painel), `estado.rs`, `ficheiro.rs`, `main.rs`. Por fazer a seguir: validação na folha de dados (em curso a análise: `TableData.tipos/obrig`, `validacao.rs`, `gravar_celula` com `reabrir`).
 - 2026-11-19: auditoria completa do working tree e melhoramentos. **Correções:** `guardar_copia` passou a gravar num ficheiro temporário e só depois substituir o destino (antes apagava o destino primeiro); `guardar_vista` verifica que a instrução é mesmo SELECT/WITH; mensagem de eliminação concorda com tabela/consulta e a seleção é reposta; `.gitignore` desduplicado. **Validação:** novo `validacao.rs` com testes (inteiros, reais, Sim/Não, datas com anos bissextos, obrigatório), metadados `TableData.tipos/obrig` obtidos por `PRAGMA table_info`, aplicados em `gravar_celula`, colagem e importação CSV (colagem/importação validam tudo antes de gravar). **Limpeza:** removidos menus pendentes (`menus.rs`, `dd_items`, campo `dropdown`, `act`/`rb`/`stack`), botões Ajuda e Guardar, cartão inativo ligado a Novo, texto «Clique para Adicionar», ícones/variáveis mortas e `id_source` → `id_salt`. `cargo check` sem avisos; `cargo test`: 6/6. Ficheiros alterados: `main.rs`, `db.rs`, `validacao.rs` (novo), `area_trabalho.rs`, `csvio.rs`, `ficheiro.rs`, `eliminar_obj.rs`, `consulta.rs`, `estrutura.rs`, `indices.rs`, `relacoes.rs`, `estado.rs`, `app.rs`, `ribbon.rs`, `navegacao.rs`, `backstage.rs`, `icones.rs`, `widgets.rs`, `filtros.rs`, `dados_exemplo.rs`, `.gitignore`, `PROJETO.md`, `CHECKLIST.md`; eliminado `menus.rs`. Por fazer: testes manuais na interface e o resto da checklist.
 - 2026-11-19 b: utilizador confirmou os testes na interface. Commit local de todo o trabalho pendente (passos 7a–7d + melhoramentos), identidade e licença: novo `README.md` (descrição, compilação FreeBSD, não afiliação, avisos das dependências), `LICENSE` com o texto oficial da GPL-3.0-or-later, `.gitignore` com resíduos do Hugo. Removidos `.hugo_build.lock` e `public/`. Ficheiros alterados: `README.md`, `LICENSE` (novos), `.gitignore`, `PROJETO.md`, `CHECKLIST.md`. Por fazer: ícone próprio, nome mais distinto, build release.
+- 2026-11-19 c: "processa tudo". Push de `main` e da tag `passo7`. **Ícone:** novo `Icon::Logo` (cilindro de base de dados azul, desenhado em código) na barra de acesso rápido; nome mantido como AccesSQL (decisão registada na secção 7). **Campos existentes:** `Database::alterar_campo` em `db.rs` recria a tabela numa transação (copia dados, recria índices/gatilhos, preserva ações das relações, nome e vistas; desliga e volta a ligar `foreign_keys`); novos helpers `acoes_fk`/`objetos_da_tabela`, tradução de erros `NOT NULL`/`UNIQUE`, `em_memoria()` para testes; na Vista Estrutura, botão «Alterar» abre tipo/obrigatório/omissão com aplicação explícita. **Demo removida:** `Database::demo()`, `abrir_demo()`, cartão do backstage, `dados_exemplo.rs` e o `mod`. `cargo check` sem avisos; `cargo test`: 9/9. Ficheiros alterados: `db.rs`, `estrutura.rs`, `icones.rs`, `ribbon.rs`, `ficheiro.rs`, `backstage.rs`, `main.rs`, `PROJETO.md`, `CHECKLIST.md`; eliminado `dados_exemplo.rs`. Build release concluído (`target/release/accessql`, FreeBSD x86-64). Por fazer: teste manual na interface e commit/push finais.

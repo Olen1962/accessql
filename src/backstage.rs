@@ -158,10 +158,6 @@ impl AccessApp {
                             if card(ui, Icon::Table, "Base de Dados em Branco", "Criar uma base de dados local vazia.").clicked() {
                                 self.criar_ficheiro();
                             }
-                            ui.add_space(6.0);
-                            if card(ui, Icon::Badge("D", C_BLUE), "Base de Dados de Demonstração", "Dados de exemplo em memória (não ficam guardados).").clicked() {
-                                self.abrir_demo();
-                            }
                         });
                         ui.add_space(40.0);
                         ui.vertical(|ui| {

@@ -1,7 +1,7 @@
 //! Camada de dados do AccesSQL (SQLite local, via rusqlite).
 
 use rusqlite::{params, params_from_iter, types::Value, types::ValueRef, Connection, OpenFlags, Row, Statement};
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 /// Conteúdo de uma tabela ou consulta já carregado em memória.
 #[derive(Default)]
@@ -82,6 +82,10 @@ pub(crate) fn traduz(e: rusqlite::Error) -> String {
         "O ficheiro não é uma base de dados SQLite válida".into()
     } else if s.contains("FOREIGN KEY constraint failed") {
         "Viola uma relação: o valor não existe na tabela relacionada, ou há registos que dependem deste".into()
+    } else if s.contains("NOT NULL constraint failed") {
+        "Há registos com o campo vazio: não é possível torná-lo obrigatório sem corrigir esses registos".into()
+    } else if s.contains("UNIQUE constraint failed") {
+        "Já existe um registo com esse valor num campo que não admite repetições".into()
     } else if s.contains("unable to open") {
         "Não foi possível abrir o ficheiro (confirme o caminho e as permissões)".into()
     } else {
@@ -218,9 +222,22 @@ fn ler(stmt: &mut Statement, skip: usize, com_rowid: bool, limite: usize, params
 mod testes {
     use super::*;
 
+    fn tabela_teste() -> Database {
+        let db = Database::em_memoria().unwrap();
+        db.criar_tabela(
+            "Clientes",
+            &[
+                Campo { nome: "ID".into(), tipo: "INTEGER".into(), pk: true, ..Default::default() },
+                Campo { nome: "Nome".into(), tipo: "TEXT".into(), ..Default::default() },
+            ],
+        )
+        .unwrap();
+        db
+    }
+
     #[test]
     fn metadados_da_tabela_chegam_a_folha_de_dados() {
-        let db = Database::demo().unwrap();
+        let db = tabela_teste();
         let (campos, _) = db.info_tabela("Clientes").unwrap();
         let id = campos.iter().find(|c| c.nome == "ID").unwrap();
         assert!(id.tipo.contains("INT"), "tipo de ID: {}", id.tipo);
@@ -229,6 +246,83 @@ mod testes {
         assert_eq!(dados.obrig.len(), dados.cols.len());
         let i = dados.cols.iter().position(|c| c.0 == "ID").unwrap();
         assert!(dados.tipos[i].contains("INT"));
+    }
+
+    #[test]
+    fn alterar_campo_preserva_dados_indices_e_integridade() {
+        let db = tabela_teste();
+        db.conn
+            .execute("INSERT INTO \"Clientes\" (\"Nome\") VALUES ('42')", [])
+            .unwrap();
+        db.conn.execute("CREATE INDEX \"ix_nome\" ON \"Clientes\" (\"Nome\")", []).unwrap();
+
+        db.alterar_campo("Clientes", "Nome", "INTEGER", true, "0").unwrap();
+
+        let (campos, _) = db.info_tabela("Clientes").unwrap();
+        let nome = campos.iter().find(|c| c.nome == "Nome").unwrap();
+        assert_eq!(nome.tipo, "INTEGER");
+        assert!(nome.obrigatorio);
+        assert_eq!(nome.omissao, "0");
+        assert!(campos.iter().find(|c| c.nome == "ID").unwrap().pk);
+
+        let dados = db.load("Clientes", true).unwrap();
+        let i = dados.cols.iter().position(|c| c.0 == "Nome").unwrap();
+        assert_eq!(dados.rows[0][i], "42");
+        let indice: i64 = db
+            .conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_nome'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(indice, 1, "o índice deve sobreviver à recriação");
+        let integridade: String = db.conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+        assert_eq!(integridade, "ok");
+    }
+
+    #[test]
+    fn alterar_campo_com_nulos_falha_sem_mudar_a_tabela() {
+        let db = tabela_teste();
+        db.conn.execute("INSERT INTO \"Clientes\" (\"Nome\") VALUES (NULL)", []).unwrap();
+        let (antes, _) = db.info_tabela("Clientes").unwrap();
+
+        let erro = db.alterar_campo("Clientes", "Nome", "TEXT", true, "").unwrap_err();
+        assert!(erro.contains("obrigatório"), "mensagem: {}", erro);
+
+        let (depois, _) = db.info_tabela("Clientes").unwrap();
+        assert!(!depois.iter().find(|c| c.nome == "Nome").unwrap().obrigatorio);
+        assert_eq!(antes.len(), depois.len());
+        assert_eq!(db.contar_registos("Clientes").unwrap(), 1);
+        let integridade: String = db.conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+        assert_eq!(integridade, "ok");
+    }
+
+    #[test]
+    fn alterar_campo_preserva_acoes_das_relacoes() {
+        let db = Database::em_memoria().unwrap();
+        db.conn
+            .execute_batch(
+                "CREATE TABLE \"Pais\" (\"ID\" INTEGER PRIMARY KEY);\n\
+                 CREATE TABLE \"Filhos\" (\
+                     \"ID\" INTEGER PRIMARY KEY, \
+                     \"Pai\" INTEGER REFERENCES \"Pais\"(\"ID\") ON DELETE CASCADE\
+                 );\n\
+                 INSERT INTO \"Pais\" (\"ID\") VALUES (1);\n\
+                 INSERT INTO \"Filhos\" (\"ID\", \"Pai\") VALUES (1, 1);",
+            )
+            .unwrap();
+
+        db.alterar_campo("Filhos", "Pai", "INTEGER", false, "").unwrap();
+
+        let mut stmt = db.conn.prepare("PRAGMA foreign_key_list('Filhos')").unwrap();
+        let acoes: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(3)?, r.get::<_, String>(6)?)))
+            .unwrap()
+            .flatten()
+            .collect();
+        let acao = acoes.iter().find(|(c, _)| c == "Pai").map(|(_, a)| a.as_str());
+        assert_eq!(acao, Some("CASCADE"), "a ação ON DELETE deve sobreviver");
     }
 }
 
@@ -384,6 +478,40 @@ fn validar_campo(c: &Campo) -> Result<(), String> {
     Ok(())
 }
 
+/// Ações ON UPDATE / ON DELETE das relações de uma tabela, por coluna de origem.
+fn acoes_fk(conn: &Connection, tabela: &str) -> HashMap<String, (String, String)> {
+    let mut out = HashMap::new();
+    let Ok(mut stmt) = conn.prepare(&format!("PRAGMA foreign_key_list({})", quote(tabela))) else {
+        return out;
+    };
+    let Ok(it) = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(3)?, // coluna de origem
+            r.get::<_, String>(5)?, // on_update
+            r.get::<_, String>(6)?, // on_delete
+        ))
+    }) else {
+        return out;
+    };
+    for (coluna, upd, del) in it.flatten() {
+        out.insert(coluna, (upd, del));
+    }
+    out
+}
+
+/// SQL dos índices e gatilhos da tabela: são apagados com o `DROP TABLE`.
+fn objetos_da_tabela(conn: &Connection, tabela: &str) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT sql FROM sqlite_master WHERE tbl_name = ?1 AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name")
+        .map_err(traduz)?;
+    let objetos = stmt
+        .query_map([tabela], |r| r.get::<_, String>(0))
+        .map_err(traduz)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(traduz);
+    objetos
+}
+
 impl Database {
     /// Abre um ficheiro existente. Não cria nada se o ficheiro não existir
     /// e recusa ficheiros que não sejam SQLite.
@@ -409,6 +537,14 @@ impl Database {
         Ok(Self { conn })
     }
 
+    /// Base de dados em memória, usada nos testes unitários.
+    #[cfg(test)]
+    fn em_memoria() -> Result<Self, String> {
+        let conn = Connection::open_in_memory().map_err(traduz)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;").map_err(traduz)?;
+        Ok(Self { conn })
+    }
+
     /// Grava uma cópia compacta da base de dados em `path` (que não pode existir).
     pub(crate) fn copy_to(&self, path: &Path) -> Result<(), String> {
         let p = path.to_string_lossy().replace('\'', "''");
@@ -423,41 +559,6 @@ impl Database {
             .map_err(traduz)?;
         self.conn.execute_batch("VACUUM").map_err(traduz)?;
         Ok(r)
-    }
-
-    /// Base de dados em memória com os dados do modelo visual.
-    /// Temporária: serve só até Ficheiro → Novo/Abrir estar ligado.
-    pub(crate) fn demo() -> rusqlite::Result<Self> {
-        let conn = Connection::open_in_memory()?;
-        for nome in ["Clientes", "Encomendas", "Produtos"] {
-            let (cols, rows) = crate::dados_exemplo::dataset(nome);
-            let defs: Vec<String> = cols
-                .iter()
-                .map(|(c, _)| {
-                    let tipo = match *c {
-                        "ID" => "INTEGER PRIMARY KEY",
-                        "Stock" => "INTEGER",
-                        _ => "TEXT",
-                    };
-                    format!("{} {}", quote(c), tipo)
-                })
-                .collect();
-            conn.execute(&format!("CREATE TABLE {} ({})", quote(nome), defs.join(", ")), [])?;
-            let marcas = vec!["?"; cols.len()].join(", ");
-            let ins = format!("INSERT INTO {} VALUES ({})", quote(nome), marcas);
-            for r in &rows {
-                conn.execute(&ins, params_from_iter(r.iter().copied()))?;
-            }
-        }
-        conn.execute_batch(
-            "CREATE VIEW \"Encomendas por Cliente\" AS \
-                 SELECT Cliente, COUNT(*) AS Encomendas FROM Encomendas \
-                 GROUP BY Cliente ORDER BY Cliente;
-             CREATE VIEW \"Produtos em Falta\" AS \
-                 SELECT * FROM Produtos WHERE Stock < 20;",
-        )?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        Ok(Self { conn })
     }
 
     fn nomes(&self, tipo: &str) -> rusqlite::Result<Vec<String>> {
@@ -749,6 +850,101 @@ impl Database {
     pub(crate) fn eliminar_campo(&self, tabela: &str, campo: &str) -> Result<(), String> {
         let sql = format!("ALTER TABLE {} DROP COLUMN {}", quote(tabela), quote(campo));
         self.conn.execute_batch(&sql).map_err(traduz)
+    }
+
+    /// Altera o tipo, a obrigatoriedade e/ou o valor por omissão de um campo existente.
+    ///
+    /// O SQLite não tem `ALTER COLUMN`: a tabela é recriada dentro de uma transação
+    /// e os dados são copiados. Índices e gatilhos são recriados, e o nome da tabela,
+    /// as chaves estrangeiras e as vistas que a usam ficam intactos. Se qualquer
+    /// passo falhar, a transação é anulada e a tabela original permanece.
+    pub(crate) fn alterar_campo(
+        &self,
+        tabela: &str,
+        nome_campo: &str,
+        tipo: &str,
+        obrigatorio: bool,
+        omissao: &str,
+    ) -> Result<(), String> {
+        let (mut campos, _) = self.info_tabela(tabela)?;
+        let Some(i) = campos.iter().position(|c| c.nome.eq_ignore_ascii_case(nome_campo)) else {
+            return Err(format!("O campo «{}» não existe na tabela «{}»", nome_campo, tabela));
+        };
+        let alterado = Campo {
+            tipo: tipo.to_string(),
+            obrigatorio,
+            omissao: omissao.to_string(),
+            ..campos[i].clone()
+        };
+        validar_campo(&alterado)?;
+        campos[i] = alterado;
+
+        // As ações ON DELETE/ON UPDATE não estão em `Campo`: lê-se do catálogo
+        // para não mudar o comportamento das relações ao recriar a tabela.
+        let acoes = acoes_fk(&self.conn, tabela);
+        let objetos = objetos_da_tabela(&self.conn, tabela)?;
+        let pks: Vec<&Campo> = campos.iter().filter(|c| c.pk).collect();
+        let inline = pks.len() == 1 && pks[0].tipo.eq_ignore_ascii_case("INTEGER");
+        let mut defs: Vec<String> = campos
+            .iter()
+            .map(|c| {
+                let mut d = definicao(c, inline && c.pk);
+                if !c.ref_tabela.trim().is_empty() {
+                    if let Some((upd, del)) = acoes.get(&c.nome) {
+                        if del != "NO ACTION" {
+                            d.push_str(&format!(" ON DELETE {}", del));
+                        }
+                        if upd != "NO ACTION" {
+                            d.push_str(&format!(" ON UPDATE {}", upd));
+                        }
+                    }
+                }
+                d
+            })
+            .collect();
+        if !pks.is_empty() && !inline {
+            let lista: Vec<String> = pks.iter().map(|c| quote(c.nome.trim())).collect();
+            defs.push(format!("PRIMARY KEY ({})", lista.join(", ")));
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = format!("__accessql_rebuild_{}", nanos);
+        let colunas: Vec<String> = campos.iter().map(|c| quote(&c.nome)).collect();
+        let lista = colunas.join(", ");
+        let mut script = format!(
+            "BEGIN IMMEDIATE;\nCREATE TABLE {} (\n  {}\n);\nINSERT INTO {} ({}) SELECT {} FROM {};\nDROP TABLE {};\nALTER TABLE {} RENAME TO {};\n",
+            quote(&tmp),
+            defs.join(",\n  "),
+            quote(&tmp),
+            lista,
+            lista,
+            quote(tabela),
+            quote(tabela),
+            quote(&tmp),
+            quote(tabela),
+        );
+        for sql in objetos {
+            script.push_str(&sql);
+            script.push_str(";\n");
+        }
+        script.push_str("COMMIT;");
+
+        // PRAGMA foreign_keys não pode mudar dentro de uma transação.
+        let fk: i64 = self.conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap_or(0);
+        if fk != 0 {
+            let _ = self.conn.execute_batch("PRAGMA foreign_keys = OFF;");
+        }
+        let resultado = self.conn.execute_batch(&script).map_err(traduz);
+        if resultado.is_err() {
+            let _ = self.conn.execute_batch("ROLLBACK;");
+        }
+        if fk != 0 {
+            let _ = self.conn.execute_batch("PRAGMA foreign_keys = ON;");
+        }
+        resultado
     }
 
     /// Muda o nome de uma tabela (`ALTER TABLE ... RENAME TO`) ou de uma consulta

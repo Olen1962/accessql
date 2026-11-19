@@ -1,6 +1,6 @@
 # AccesSQL: lista de funcionalidades
 
-Legenda: `[x]` feito e testado · `[x]` por fazer · «(escrito, por testar)» = código entregue, ainda sem confirmação.
+Legenda: `[x]` feito · `[ ]` por fazer · «(escrito, por testar)» = código entregue, ainda sem confirmação na interface.
 Atualizada em 2026-11-19.
 
 - **Ficheiro (backstage)**
@@ -13,8 +13,8 @@ Atualizada em 2026-11-19.
   - [x] Fechar Base de Dados
   - [x] Sair
   - [x] Gravação automática (não há «Guardar»: cada alteração fica logo gravada)
-  - [x] Base de dados de demonstração (temporária, em memória)
-  - [ ] Remover a base de demonstração e `dados_exemplo.rs`
+  - [x] Base de demonstração removida: não era funcional (dados em memória que não ficavam guardados)
+  - [x] Removidos `Database::demo()`, `abrir_demo()`, o cartão do backstage e `dados_exemplo.rs`
   - [ ] Guardar Script / Abrir Script (`.sql`) (ideia, a decidir)
 
 - **Editar e teclado**
@@ -66,13 +66,13 @@ Atualizada em 2026-11-19.
 
 - **Ribbon: Folha de Dados (separador contextual)**
   - [x] Novo Campo, Renomear Campo e Eliminar Campo abrem a Vista Estrutura já posicionada no campo selecionado; botões decorativos retirados
-  - [ ] Tipo de Dados
-  - [ ] Validação (`NOT NULL`, `UNIQUE`, `CHECK`, `DEFAULT`)
+  - [x] Tipo de Dados: combo na Vista Estrutura (criar e alterar campos)
+  - [x] Validação: tipos e `NOT NULL` ao gravar/colar/importar; `UNIQUE`, `CHECK` e `DEFAULT` tratados pelo SQLite (`DEFAULT` também se define na estrutura)
 
 - **Barra de acesso rápido e janela**
   - [x] Título e identidade AccesSQL na janela
   - [x] Aspeto Office 2007–2010 mantido
-  - [x] Botões Desfazer e Refazer ligados; «Guardar» avisa que a gravação é automática
+  - [x] Botões Desfazer e Refazer ligados; «Guardar» retirado (a gravação é automática)
   - [x] Botão de ajuda «?» removido (botões sem função real não ficam)
 
 - **Painel de navegação**
@@ -108,7 +108,7 @@ Atualizada em 2026-11-19.
   - [x] Ver a definição SQL original
   - [x] Criar tabelas novas
   - [x] Acrescentar, renomear e eliminar campos
-  - [ ] Mudar o tipo, a obrigatoriedade ou o valor por omissão de um campo existente (exige recriar a tabela)
+  - [x] Mudar o tipo, a obrigatoriedade ou o valor por omissão de um campo existente: botão «Alterar» na Vista Estrutura; recriação da tabela numa transação, com cópia dos dados, índices, gatilhos, relações e vistas preservados (3 testes unitários)
   - [ ] Chaves primárias compostas e `UNIQUE`/`CHECK` ao criar tabelas
   - [x] Indicar chaves estrangeiras (coluna «Refere a») ao criar tabelas e ao acrescentar um campo; ver as que já existem
   - [x] Criar e eliminar índices (pela janela Índices, em Ferramentas de Bases de Dados; implementado; falta teste manual)
@@ -141,15 +141,15 @@ Atualizada em 2026-11-19.
   - [x] Etiquetar o `passo6b` e o `passo7a`
   - [x] Limpar os avisos do compilador (`cargo check` sem avisos; `id_source` → `id_salt`, imports e código morto removidos)
   - [x] Passo 7: limpar o ribbon e os menus (retirar tudo o que não tenha função)
-  - [x] Testes automáticos: 5 testes de validação e 1 teste de metadados em `db.rs` (`cargo test`: 6/6)
+  - [x] Testes automáticos: 5 de validação e 4 em `db.rs` (metadados, alteração de campos, nulos e relações) — `cargo test`: 9/9
 
 - **Identidade, licença e distribuição**
-  - [ ] Ícone próprio no lugar do «A» vermelho (evita semelhança com o logótipo do Access)
-  - [ ] Nome mais distinto do que «AccesSQL» (a decidir)
+  - [x] Ícone próprio no lugar do «A» vermelho: cilindro de base de dados azul desenhado em código (`Icon::Logo` na barra de acesso rápido)
+  - [x] Nome mantido como «AccesSQL» por decisão: está consolidado no repositório e na configuração; a distinção face ao Access faz-se pelo ícone e pela nota de não afiliação no README
   - [x] Licença GPL-3.0-or-later (`LICENSE`, texto oficial)
   - [x] `README.md` com descrição, compilação na FreeBSD e nota de não afiliação à Microsoft
   - [x] Lista dos avisos de direitos de autor das bibliotecas (no README)
-  - [ ] Compilação em modo release verificada (instruções já no README)
+  - [x] Compilação em modo release verificada (`cargo build --release --locked`; binário FreeBSD x86-64 em `target/release/accessql`)
 
 - **Fora do âmbito desta versão**
   - Formulários e Relatórios

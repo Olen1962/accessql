@@ -89,17 +89,6 @@ impl AccessApp {
         }
     }
 
-    /// Base de dados em memória com dados de exemplo (temporária, para testes).
-    pub(crate) fn abrir_demo(&mut self) {
-        match Database::demo() {
-            Ok(db) => {
-                self.instalar_bd(db, None, "Demonstração".into());
-                self.msg = "Base de dados de demonstração (em memória): as alterações não ficam guardadas".into();
-            }
-            Err(e) => self.msg = format!("Erro ao criar a base de dados de demonstração: {}", e),
-        }
-    }
-
     /// Guarda uma cópia da base de dados aberta noutro ficheiro (a atual continua aberta).
     pub(crate) fn guardar_copia(&mut self) {
         let Some(db) = self.db.as_ref() else {

@@ -19,7 +19,7 @@ impl AccessApp {
                     ui.spacing_mut().item_spacing = Vec2::new(1.0, 0.0);
                     ui.add_space(6.0);
                     let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                    draw_icon(ui.painter(), r, Icon::Badge("A", ACCENT));
+                    draw_icon(ui.painter(), r, Icon::Logo);
                     ui.add_space(6.0);
                     for (ic, tip) in [
                         (Icon::Undo, "Desfazer (Ctrl+Z)"),

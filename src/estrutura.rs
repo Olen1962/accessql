@@ -28,6 +28,8 @@ pub(crate) struct Estrutura {
     /// Campos a que se pode ligar uma chave estrangeira: (tabela, campo).
     pub(crate) fk_opcoes: Vec<(String, String)>,
     pub(crate) eliminar: Option<usize>,
+    /// Campo existente em edição: (índice, cópia editável tipo/obrigatório/omissão).
+    pub(crate) editar: Option<(usize, Campo)>,
     /// Campo a acrescentar a uma tabela existente.
     pub(crate) novo: Campo,
     pub(crate) info: String,
@@ -71,6 +73,7 @@ enum Ac {
     Criar,
     Acrescentar,
     Renomear(usize, String),
+    Alterar(usize, Campo),
     Eliminar(usize),
     AddLinha,
     RemLinha(usize),
@@ -271,6 +274,9 @@ impl AccessApp {
         if est.renomear.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             est.renomear = None;
         }
+        if est.editar.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            est.editar = None;
+        }
         let mut ac: Option<Ac> = None;
         egui::ScrollArea::vertical().id_salt("estr_scroll").auto_shrink([false, false]).show(ui, |ui| {
             ui.add_space(6.0);
@@ -302,6 +308,31 @@ impl AccessApp {
                     if ui.button("Cancelar").clicked() {
                         est.eliminar = None;
                     }
+                });
+                ui.add_space(6.0);
+            }
+            if let Some((i, ref mut c)) = est.editar {
+                let nome = est.campos.get(i).map(|f| f.nome.clone()).unwrap_or_default();
+                let mut cancelar = false;
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(format!("Alterar o campo «{}»:", nome)).strong());
+                    combo_tipo(ui, "tipo_editar", &mut c.tipo);
+                    ui.checkbox(&mut c.obrigatorio, "Obrigatório");
+                    ui.add(egui::TextEdit::singleline(&mut c.omissao).hint_text("valor por omissão").desired_width(130.0));
+                    if ui.button("Aplicar").clicked() {
+                        ac = Some(Ac::Alterar(i, c.clone()));
+                    }
+                    if ui.button("Cancelar").clicked() {
+                        cancelar = true;
+                    }
+                });
+                if cancelar {
+                    est.editar = None;
+                }
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(8.0);
+                    ui.weak("A alteração recria a tabela e copia os dados; índices e relações são preservados. Registos com valor vazio podem impedir tornar o campo obrigatório.");
                 });
                 ui.add_space(6.0);
             }
@@ -376,10 +407,17 @@ impl AccessApp {
                                     est.sel = Some(i);
                                     est.renomear = Some((i, c.nome.clone()));
                                     est.foco_ren = true;
+                                    est.editar = None;
+                                }
+                                if ui.small_button("Alterar").clicked() {
+                                    est.sel = Some(i);
+                                    est.renomear = None;
+                                    est.editar = Some((i, c.clone()));
                                 }
                                 if ui.small_button("Eliminar").clicked() {
                                     est.sel = Some(i);
                                     est.eliminar = Some(i);
+                                    est.editar = None;
                                 }
                             });
                         }
@@ -442,7 +480,7 @@ impl AccessApp {
             }
         });
 
-        let altera = matches!(ac, Some(Ac::Criar) | Some(Ac::Acrescentar) | Some(Ac::Renomear(..)) | Some(Ac::Eliminar(_)));
+        let altera = matches!(ac, Some(Ac::Criar) | Some(Ac::Acrescentar) | Some(Ac::Renomear(..)) | Some(Ac::Alterar(..)) | Some(Ac::Eliminar(_)));
         match ac {
             Some(Ac::AddLinha) => est.campos.push(campo_texto()),
             Some(Ac::RemLinha(i)) => {
@@ -507,6 +545,28 @@ impl AccessApp {
                 match r {
                     Some(Ok((campos, sql))) => {
                         est.info = format!("Campo «{}» renomeado para «{}»", de, para.trim());
+                        est.info_erro = false;
+                        est.campos = campos;
+                        est.sql = sql;
+                        self.recarregar_abertos(&tabela);
+                    }
+                    Some(Err(e)) => {
+                        est.info = e;
+                        est.info_erro = true;
+                    }
+                    None => {}
+                }
+            }
+            Some(Ac::Alterar(i, novo)) => {
+                let nome = est.campos.get(i).map(|c| c.nome.clone()).unwrap_or_default();
+                let r = self.db.as_ref().map(|db| {
+                    db.alterar_campo(&tabela, &nome, &novo.tipo, novo.obrigatorio, &novo.omissao)
+                        .and_then(|_| db.info_tabela(&tabela))
+                });
+                est.editar = None;
+                match r {
+                    Some(Ok((campos, sql))) => {
+                        est.info = format!("Campo «{}» alterado", nome);
                         est.info_erro = false;
                         est.campos = campos;
                         est.sql = sql;

@@ -3,6 +3,8 @@ use crate::tema::*;
 // ───────────────────────────── Ícones desenhados (sem imagens) ─────────────────────────────
 #[derive(Clone, Copy)]
 pub(crate) enum Icon {
+    /// Símbolo próprio do AccesSQL: cilindro de base de dados.
+    Logo,
     Table,
     Query,
     Filter,
@@ -28,6 +30,27 @@ pub(crate) fn draw_icon(p: &egui::Painter, r: Rect, icon: Icon) {
     let s = r.width();
     let line = Stroke::new(1.0_f32, rgb(0x6B7F9E));
     match icon {
+        Icon::Logo => {
+            // Cilindro de base de dados: corpo + três camadas, em azul.
+            let c = r.center();
+            let rx = s * 0.34;
+            let ry = s * 0.11;
+            let topo = Pos2::new(c.x, r.top() + s * 0.26);
+            let fundo = Pos2::new(c.x, r.bottom() - s * 0.26);
+            p.rect_filled(
+                Rect::from_min_max(Pos2::new(c.x - rx, topo.y), Pos2::new(c.x + rx, fundo.y)),
+                0.0,
+                rgb(0x2F6FA8),
+            );
+            for (y, cor) in [
+                (fundo, rgb(0x2F6FA8)),
+                (Pos2::new(c.x, topo.y + (fundo.y - topo.y) * 0.55), rgb(0x4F86B8)),
+                (Pos2::new(c.x, topo.y + (fundo.y - topo.y) * 0.28), rgb(0x4F86B8)),
+                (topo, rgb(0x76A9D2)),
+            ] {
+                p.add(Shape::ellipse_filled(y, Vec2::new(rx, ry), cor));
+            }
+        }
         Icon::Table | Icon::Query => {
             let b = r.shrink(s * 0.08);
             p.rect_filled(b, 1.0, Color32::WHITE);
