@@ -1,7 +1,7 @@
 //! Vista Estrutura: ver, criar e alterar os campos de uma tabela.
 
 use crate::{
-    db::{Campo, TIPOS},
+    db::{restricoes_tabela, Campo, TIPOS},
     estado::*,
     icones::Icon,
     tema::*,
@@ -18,6 +18,8 @@ pub(crate) struct Estrutura {
     pub(crate) campos: Vec<Campo>,
     /// Texto `CREATE TABLE` original (só em tabelas existentes).
     pub(crate) sql: String,
+    /// Restrições de tabela: uma por linha (só editáveis em tabela nova).
+    pub(crate) restricoes: String,
     /// Campo selecionado (o F2 muda-lhe o nome).
     pub(crate) sel: Option<usize>,
     pub(crate) renomear: Option<(usize, String)>,
@@ -104,7 +106,8 @@ impl AccessApp {
         match r {
             Ok((campos, sql)) => {
                 let fk_opcoes = self.db.as_ref().and_then(|db| db.opcoes_fk().ok()).unwrap_or_default();
-                let est = Estrutura { campos, sql, novo: campo_texto(), fk_opcoes, ..Default::default() };
+                let restricoes = restricoes_tabela(&sql).join("\n");
+                let est = Estrutura { campos, sql, restricoes, novo: campo_texto(), fk_opcoes, ..Default::default() };
                 let doc = Doc {
                     kind: ObjKind::Design,
                     name: nome.to_string(),
@@ -320,6 +323,14 @@ impl AccessApp {
                     combo_tipo(ui, "tipo_editar", &mut c.tipo);
                     ui.checkbox(&mut c.obrigatorio, "Obrigatório");
                     ui.add(egui::TextEdit::singleline(&mut c.omissao).hint_text("valor por omissão").desired_width(130.0));
+                    ui.checkbox(&mut c.unico, "Único");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut c.check)
+                            .hint_text("expressão CHECK")
+                            .desired_width(180.0),
+                    );
+                    ui.checkbox(&mut c.autoincrement, "Auto")
+                        .on_hover_text("Numeração automática (só com chave primária INTEGER)");
                     if ui.button("Aplicar").clicked() {
                         ac = Some(Ac::Alterar(i, c.clone()));
                     }
@@ -332,14 +343,26 @@ impl AccessApp {
                 }
                 ui.horizontal_wrapped(|ui| {
                     ui.add_space(8.0);
-                    ui.weak("A alteração recria a tabela e copia os dados; índices e relações são preservados. Registos com valor vazio podem impedir tornar o campo obrigatório.");
+                    ui.weak("A alteração recria a tabela e copia os dados; índices, relações e restrições UNIQUE/CHECK são preservados. Registos com valor vazio podem impedir tornar o campo obrigatório.");
                 });
                 ui.add_space(6.0);
             }
             ui.horizontal(|ui| {
                 ui.add_space(8.0);
                 egui::Grid::new("estr_grid").striped(true).spacing([12.0, 6.0]).show(ui, |ui| {
-                    for h in ["", "Nome do Campo", "Tipo de Dados", "Obrigatório", "Valor por Omissão", "Chave Primária", "Refere a", ""] {
+                    for h in [
+                        "",
+                        "Nome do Campo",
+                        "Tipo de Dados",
+                        "Obrigatório",
+                        "Valor por Omissão",
+                        "Chave Primária",
+                        "Único",
+                        "Verificação (CHECK)",
+                        "Auto",
+                        "Refere a",
+                        "",
+                    ] {
                         ui.label(RichText::new(h).strong());
                     }
                     ui.end_row();
@@ -360,6 +383,15 @@ impl AccessApp {
                             ui.checkbox(&mut c.obrigatorio, "");
                             ui.add(egui::TextEdit::singleline(&mut c.omissao).desired_width(130.0));
                             ui.checkbox(&mut c.pk, "");
+                            ui.checkbox(&mut c.unico, "").on_hover_text("Não admite valores repetidos");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut c.check)
+                                    .hint_text("ex.: Nome <> ''")
+                                    .desired_width(150.0),
+                            )
+                            .on_hover_text("Expressão CHECK, sem o CHECK ( )");
+                            ui.checkbox(&mut c.autoincrement, "")
+                                .on_hover_text("Numeração automática (só com chave primária INTEGER)");
                             combo_fk(ui, ("fk", i), &mut c.ref_tabela, &mut c.ref_coluna, &est.fk_opcoes);
                             if ui.small_button("✕").on_hover_text("Remover campo").clicked() {
                                 ac = Some(Ac::RemLinha(i));
@@ -401,6 +433,9 @@ impl AccessApp {
                             ui.label(if c.obrigatorio { "Sim" } else { "Não" });
                             ui.label(&c.omissao);
                             ui.label(if c.pk { "Sim" } else { "" });
+                            ui.label(if c.unico { "Sim" } else { "" });
+                            ui.label(&c.check);
+                            ui.label(if c.autoincrement { "Sim" } else { "" });
                             ui.label(if c.ref_tabela.is_empty() { String::new() } else { format!("{}({})", c.ref_tabela, c.ref_coluna) });
                             ui.horizontal(|ui| {
                                 if ui.small_button("Renomear").clicked() {
@@ -439,7 +474,20 @@ impl AccessApp {
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     ui.add_space(8.0);
-                    ui.weak("Uma chave primária INTEGER é numerada automaticamente. Valor por omissão: número, texto, NULL ou CURRENT_TIMESTAMP. F2 vai para o nome do campo selecionado.");
+                    ui.weak("Marque «Auto» para numerar automaticamente (só em chave primária INTEGER). Valor por omissão: número, texto, NULL ou CURRENT_TIMESTAMP. F2 vai para o nome do campo selecionado.");
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    egui::CollapsingHeader::new("Restrições de tabela").show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut est.restricoes)
+                                .hint_text("UNIQUE (\"a\", \"b\")\nCHECK (\"a\" <> \"b\")")
+                                .desired_rows(3)
+                                .desired_width(420.0),
+                        );
+                        ui.weak("Uma restrição por linha. Exemplos: UNIQUE (\"a\", \"b\") ou CHECK (\"a\" <> 'x').");
+                    });
                 });
             } else {
                 ui.horizontal(|ui| {
@@ -459,6 +507,12 @@ impl AccessApp {
                     combo_fk(ui, "fk_novo", &mut est.novo.ref_tabela, &mut est.novo.ref_coluna, &est.fk_opcoes);
                     ui.checkbox(&mut est.novo.obrigatorio, "Obrigatório");
                     ui.add(egui::TextEdit::singleline(&mut est.novo.omissao).hint_text("valor por omissão").desired_width(130.0));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut est.novo.check)
+                            .hint_text("expressão CHECK")
+                            .desired_width(150.0),
+                    )
+                    .on_hover_text("Verificação CHECK opcional; UNIQUE e AUTO exigem recriar a tabela");
                     if ui.button("Acrescentar").clicked() {
                         ac = Some(Ac::Acrescentar);
                     }
@@ -468,6 +522,13 @@ impl AccessApp {
                     ui.add_space(8.0);
                     egui::CollapsingHeader::new("Definição SQL").show(ui, |ui| {
                         ui.label(RichText::new(est.sql.clone()).monospace());
+                    });
+                    egui::CollapsingHeader::new("Restrições de tabela").show(ui, |ui| {
+                        if est.restricoes.trim().is_empty() {
+                            ui.weak("Nenhuma restrição UNIQUE/CHECK ao nível da tabela.");
+                        } else {
+                            ui.label(RichText::new(est.restricoes.clone()).monospace());
+                        }
                     });
                 });
             }
@@ -491,12 +552,14 @@ impl AccessApp {
             }
             Some(Ac::Criar) => {
                 let nome = est.nome_tabela.trim().to_string();
-                let r = self
-                    .db
-                    .as_ref()
-                    .map(|db| db.criar_tabela(&nome, &est.campos).and_then(|_| db.info_tabela(&nome)));
+                let restricoes: Vec<String> = est.restricoes.lines().map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+                let r = self.db.as_ref().map(|db| {
+                    db.criar_tabela_com_restricoes(&nome, &est.campos, &restricoes)
+                        .and_then(|_| db.info_tabela(&nome))
+                });
                 match r {
                     Some(Ok((campos, sql))) => {
+                        est.restricoes = restricoes_tabela(&sql).join("\n");
                         est.campos = campos;
                         est.sql = sql;
                         est.nova = false;
@@ -523,6 +586,7 @@ impl AccessApp {
                     Some(Ok((campos, sql))) => {
                         est.info = format!("Campo «{}» acrescentado", est.novo.nome.trim());
                         est.info_erro = false;
+                        est.restricoes = restricoes_tabela(&sql).join("\n");
                         est.campos = campos;
                         est.sql = sql;
                         est.novo = campo_texto();
@@ -546,6 +610,7 @@ impl AccessApp {
                     Some(Ok((campos, sql))) => {
                         est.info = format!("Campo «{}» renomeado para «{}»", de, para.trim());
                         est.info_erro = false;
+                        est.restricoes = restricoes_tabela(&sql).join("\n");
                         est.campos = campos;
                         est.sql = sql;
                         self.recarregar_abertos(&tabela);
@@ -560,14 +625,14 @@ impl AccessApp {
             Some(Ac::Alterar(i, novo)) => {
                 let nome = est.campos.get(i).map(|c| c.nome.clone()).unwrap_or_default();
                 let r = self.db.as_ref().map(|db| {
-                    db.alterar_campo(&tabela, &nome, &novo.tipo, novo.obrigatorio, &novo.omissao)
-                        .and_then(|_| db.info_tabela(&tabela))
+                    db.alterar_campo(&tabela, &nome, &novo).and_then(|_| db.info_tabela(&tabela))
                 });
                 est.editar = None;
                 match r {
                     Some(Ok((campos, sql))) => {
                         est.info = format!("Campo «{}» alterado", nome);
                         est.info_erro = false;
+                        est.restricoes = restricoes_tabela(&sql).join("\n");
                         est.campos = campos;
                         est.sql = sql;
                         self.recarregar_abertos(&tabela);
@@ -590,6 +655,7 @@ impl AccessApp {
                     Some(Ok((campos, sql))) => {
                         est.info = format!("Campo «{}» eliminado", nome);
                         est.info_erro = false;
+                        est.restricoes = restricoes_tabela(&sql).join("\n");
                         est.campos = campos;
                         est.sql = sql;
                         est.sel = None;

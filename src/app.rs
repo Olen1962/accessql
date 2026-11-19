@@ -6,6 +6,30 @@ impl eframe::App for AccessApp {
         // sem os atalhos de zoom do egui (Ctrl +, Ctrl -, Ctrl 0): em teclados portugueses a tecla
         // do apóstrofo é fisicamente a do «menos» e o egui consumia o Ctrl+'
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        // Ctrl + roda do rato aumenta/diminui a escala de toda a interface.
+        // O egui 0.29 trata a roda com Ctrl como zoom interno, mas não altera
+        // o zoom global; os atalhos de teclado estão desativados acima.
+        let passos_zoom: f32 = ctx.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|e| match e {
+                    egui::Event::MouseWheel { unit, delta, modifiers } if modifiers.ctrl => {
+                        let y = match unit {
+                            egui::MouseWheelUnit::Point => delta.y / 50.0,
+                            _ => delta.y,
+                        };
+                        Some(y)
+                    }
+                    _ => None,
+                })
+                .sum()
+        });
+        if passos_zoom != 0.0 {
+            // Rola para baixo = diminuir; para cima = aumentar.
+            let z = ctx.zoom_factor() / 1.1_f32.powf(passos_zoom);
+            let z = z.clamp(0.5, 2.5);
+            ctx.set_zoom_factor((z * 20.0).round() / 20.0);
+        }
         if std::env::var_os("ACCESSQL_DEBUG").is_some() {
             // diagnóstico: mostra na barra de estado as teclas e o texto que chegam ao egui
             let t: Vec<String> = ctx.input(|i| {

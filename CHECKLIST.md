@@ -27,7 +27,8 @@ Atualizada em 2026-11-19.
   - [x] Delete limpa a célula; Backspace abre a edição vazia
   - [x] Setas, Ctrl+setas, Home, End, PgUp, PgDn
   - [x] Backspace e setas nas caixas de texto (correção do método de entrada do X11)
-  - [x] Zoom do egui desativado (conflitava com o apóstrofo)
+  - [x] Zoom do teclado do egui desativado (conflitava com o apóstrofo em teclados portugueses)
+  - [x] Ctrl + roda do rato aumenta/diminui a escala de toda a interface (0,5× a 2,5×, em passos de 5%)
   - [ ] Confirmar acentos (ç, ã, é) depois da correção do teclado
   - [x] Desfazer e Refazer: Ctrl+Z, Ctrl+Y (ou Ctrl+Shift+Z) e botões da barra de acesso rápido; cobrem células, registos criados e eliminados, colagens
   - [ ] Ctrl+; (data de hoje) e Ctrl+Shift+; (hora) (sugestão)
@@ -67,7 +68,7 @@ Atualizada em 2026-11-19.
 - **Ribbon: Folha de Dados (separador contextual)**
   - [x] Novo Campo, Renomear Campo e Eliminar Campo abrem a Vista Estrutura já posicionada no campo selecionado; botões decorativos retirados
   - [x] Tipo de Dados: combo na Vista Estrutura (criar e alterar campos)
-  - [x] Validação: tipos e `NOT NULL` ao gravar/colar/importar; `UNIQUE`, `CHECK` e `DEFAULT` tratados pelo SQLite (`DEFAULT` também se define na estrutura)
+  - [x] Validação: tipos e `NOT NULL` ao gravar/colar/importar; `UNIQUE`, `CHECK` e `DEFAULT` tratados pelo SQLite (os três também se definem na estrutura; mensagens de erro traduzidas)
 
 - **Barra de acesso rápido e janela**
   - [x] Título e identidade AccesSQL na janela
@@ -109,7 +110,8 @@ Atualizada em 2026-11-19.
   - [x] Criar tabelas novas
   - [x] Acrescentar, renomear e eliminar campos
   - [x] Mudar o tipo, a obrigatoriedade ou o valor por omissão de um campo existente: botão «Alterar» na Vista Estrutura; recriação da tabela numa transação, com cópia dos dados, índices, gatilhos, relações e vistas preservados (3 testes unitários)
-  - [ ] Chaves primárias compostas e `UNIQUE`/`CHECK` ao criar tabelas
+  - [x] `UNIQUE`/`CHECK` por campo e `AUTOINCREMENT` ao criar tabelas; restrições de tabela `UNIQUE (...)`/`CHECK (...)` numa caixa de texto
+  - [x] Preservação de `UNIQUE`/`CHECK`/`AUTOINCREMENT` (por campo e de tabela) ao alterar campos existentes (4 testes unitários novos)
   - [x] Indicar chaves estrangeiras (coluna «Refere a») ao criar tabelas e ao acrescentar um campo; ver as que já existem
   - [x] Criar e eliminar índices (pela janela Índices, em Ferramentas de Bases de Dados; implementado; falta teste manual)
 
@@ -141,7 +143,7 @@ Atualizada em 2026-11-19.
   - [x] Etiquetar o `passo6b` e o `passo7a`
   - [x] Limpar os avisos do compilador (`cargo check` sem avisos; `id_source` → `id_salt`, imports e código morto removidos)
   - [x] Passo 7: limpar o ribbon e os menus (retirar tudo o que não tenha função)
-  - [x] Testes automáticos: 5 de validação e 4 em `db.rs` (metadados, alteração de campos, nulos e relações) — `cargo test`: 9/9
+  - [x] Testes automáticos: 5 de validação e 8 em `db.rs` (metadados, alteração de campos, nulos, relações, UNIQUE/CHECK/AUTOINCREMENT e parser) — `cargo test`: 13/13
 
 - **Identidade, licença e distribuição**
   - [x] Ícone próprio no lugar do «A» vermelho: cilindro de base de dados azul desenhado em código (`Icon::Logo` na barra de acesso rápido)

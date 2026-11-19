@@ -32,6 +32,12 @@ pub(crate) struct Campo {
     /// Chave estrangeira: tabela e campo a que este campo se refere (vazios = nenhuma).
     pub(crate) ref_tabela: String,
     pub(crate) ref_coluna: String,
+    /// Restrição UNIQUE ao nível da coluna.
+    pub(crate) unico: bool,
+    /// Corpo de uma restrição CHECK ao nível da coluna (sem o `CHECK (` inicial).
+    pub(crate) check: String,
+    /// Chave primária INTEGER com numeração automática (`AUTOINCREMENT`).
+    pub(crate) autoincrement: bool,
 }
 
 /// Uma relação (chave estrangeira) entre duas tabelas.
@@ -86,6 +92,10 @@ pub(crate) fn traduz(e: rusqlite::Error) -> String {
         "Há registos com o campo vazio: não é possível torná-lo obrigatório sem corrigir esses registos".into()
     } else if s.contains("UNIQUE constraint failed") {
         "Já existe um registo com esse valor num campo que não admite repetições".into()
+    } else if s.contains("CHECK constraint failed") {
+        "O valor não cumpre a verificação definida para o campo".into()
+    } else if s.contains("AUTOINCREMENT is only allowed") {
+        "A numeração automática só é possível numa chave primária INTEGER".into()
     } else if s.contains("unable to open") {
         "Não foi possível abrir o ficheiro (confirme o caminho e as permissões)".into()
     } else {
@@ -256,7 +266,8 @@ mod testes {
             .unwrap();
         db.conn.execute("CREATE INDEX \"ix_nome\" ON \"Clientes\" (\"Nome\")", []).unwrap();
 
-        db.alterar_campo("Clientes", "Nome", "INTEGER", true, "0").unwrap();
+        let novo = Campo { tipo: "INTEGER".into(), obrigatorio: true, omissao: "0".into(), ..Default::default() };
+        db.alterar_campo("Clientes", "Nome", &novo).unwrap();
 
         let (campos, _) = db.info_tabela("Clientes").unwrap();
         let nome = campos.iter().find(|c| c.nome == "Nome").unwrap();
@@ -287,7 +298,8 @@ mod testes {
         db.conn.execute("INSERT INTO \"Clientes\" (\"Nome\") VALUES (NULL)", []).unwrap();
         let (antes, _) = db.info_tabela("Clientes").unwrap();
 
-        let erro = db.alterar_campo("Clientes", "Nome", "TEXT", true, "").unwrap_err();
+        let novo = Campo { tipo: "TEXT".into(), obrigatorio: true, ..Default::default() };
+        let erro = db.alterar_campo("Clientes", "Nome", &novo).unwrap_err();
         assert!(erro.contains("obrigatório"), "mensagem: {}", erro);
 
         let (depois, _) = db.info_tabela("Clientes").unwrap();
@@ -313,7 +325,8 @@ mod testes {
             )
             .unwrap();
 
-        db.alterar_campo("Filhos", "Pai", "INTEGER", false, "").unwrap();
+        let novo = Campo { tipo: "INTEGER".into(), ..Default::default() };
+        db.alterar_campo("Filhos", "Pai", &novo).unwrap();
 
         let mut stmt = db.conn.prepare("PRAGMA foreign_key_list('Filhos')").unwrap();
         let acoes: Vec<(String, String)> = stmt
@@ -323,6 +336,122 @@ mod testes {
             .collect();
         let acao = acoes.iter().find(|(c, _)| c == "Pai").map(|(_, a)| a.as_str());
         assert_eq!(acao, Some("CASCADE"), "a ação ON DELETE deve sobreviver");
+    }
+
+    #[test]
+    fn criar_tabela_com_unique_check_e_autoincrement() {
+        let db = Database::em_memoria().unwrap();
+        let campos = [
+            Campo { nome: "ID".into(), tipo: "INTEGER".into(), pk: true, autoincrement: true, ..Default::default() },
+            Campo {
+                nome: "Nome".into(),
+                tipo: "TEXT".into(),
+                unico: true,
+                check: "length(\"Nome\") > 0".into(),
+                ..Default::default()
+            },
+        ];
+        db.criar_tabela("Pessoas", &campos).unwrap();
+
+        let (lidos, sql) = db.info_tabela("Pessoas").unwrap();
+        assert!(lidos[0].autoincrement, "AUTOINCREMENT deve ser lido do catálogo");
+        assert!(lidos[1].unico, "UNIQUE deve ser lido do catálogo");
+        assert_eq!(lidos[1].check, "length(\"Nome\") > 0");
+        assert!(sql.contains("AUTOINCREMENT") && sql.contains("UNIQUE") && sql.contains("CHECK"));
+
+        db.conn.execute("INSERT INTO \"Pessoas\" (\"Nome\") VALUES ('Ana')", []).unwrap();
+        let erro = db.conn.execute("INSERT INTO \"Pessoas\" (\"Nome\") VALUES ('Ana')", []).unwrap_err();
+        assert!(erro.to_string().contains("UNIQUE"), "UNIQUE deve ser aplicado: {}", erro);
+        let erro = db.conn.execute("INSERT INTO \"Pessoas\" (\"Nome\") VALUES ('')", []).unwrap_err();
+        assert!(erro.to_string().contains("CHECK"), "CHECK deve ser aplicado: {}", erro);
+    }
+
+    #[test]
+    fn alterar_campo_preserva_restricoes_inline_e_de_tabela() {
+        let db = Database::em_memoria().unwrap();
+        db.conn
+            .execute_batch(
+                "CREATE TABLE \"P\" (\
+                     \"ID\" INTEGER PRIMARY KEY AUTOINCREMENT, \
+                     \"Nome\" TEXT UNIQUE CHECK(length(\"Nome\") > 0), \
+                     \"Cidade\" TEXT, \
+                     CONSTRAINT \"uq_nome_cidade\" UNIQUE (\"Nome\", \"Cidade\"), \
+                     CHECK (\"Cidade\" <> 'x')\
+                 );\
+                 INSERT INTO \"P\" (\"Nome\", \"Cidade\") VALUES ('Ana', 'Porto');",
+            )
+            .unwrap();
+
+        let (campos, _) = db.info_tabela("P").unwrap();
+        let nome = campos.iter().find(|c| c.nome == "Nome").unwrap();
+        assert!(nome.unico && !nome.autoincrement);
+        assert_eq!(nome.check, "length(\"Nome\") > 0");
+
+        let novo = Campo {
+            tipo: "TEXT".into(),
+            unico: true,
+            check: "length(\"Nome\") > 0".into(),
+            ..Default::default()
+        };
+        db.alterar_campo("P", "Nome", &novo).unwrap();
+
+        let sql: String = db
+            .conn
+            .query_row("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'P'", [], |r| r.get(0))
+            .unwrap();
+        assert!(sql.contains("AUTOINCREMENT"), "sql: {sql}");
+        assert!(sql.contains("uq_nome_cidade"), "a restrição de tabela com nome deve sobreviver: {sql}");
+        assert!(sql.contains("UNIQUE (\"Nome\", \"Cidade\")"), "sql: {sql}");
+        assert!(sql.contains("\"Cidade\" <> 'x'"), "sql: {sql}");
+        assert_eq!(db.contar_registos("P").unwrap(), 1);
+
+        let erro = db.conn.execute("INSERT INTO \"P\" (\"Nome\", \"Cidade\") VALUES ('Ana', 'Porto')", []).unwrap_err();
+        assert!(erro.to_string().contains("UNIQUE"), "sql: {sql}");
+        let integridade: String = db.conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+        assert_eq!(integridade, "ok");
+    }
+
+    #[test]
+    fn acrescentar_campo_aceita_check_mas_recusa_unique_e_autoincrement() {
+        let db = tabela_teste();
+        let erro = db
+            .acrescentar_campo("Clientes", &Campo { nome: "x".into(), tipo: "TEXT".into(), unico: true, ..Default::default() })
+            .unwrap_err();
+        assert!(erro.contains("UNIQUE"), "mensagem: {}", erro);
+        let erro = db
+            .acrescentar_campo(
+                "Clientes",
+                &Campo { nome: "x".into(), tipo: "INTEGER".into(), autoincrement: true, ..Default::default() },
+            )
+            .unwrap_err();
+        assert!(erro.contains("numeração automática"), "mensagem: {}", erro);
+
+        db.acrescentar_campo(
+            "Clientes",
+            &Campo { nome: "x".into(), tipo: "INTEGER".into(), check: "x > 0".into(), ..Default::default() },
+        )
+        .unwrap();
+        let sql: String = db
+            .conn
+            .query_row("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'Clientes'", [], |r| r.get(0))
+            .unwrap();
+        assert!(sql.contains("CHECK (x > 0)"), "sql: {sql}");
+    }
+
+    #[test]
+    fn parser_respeita_virgulas_e_palavras_dentro_de_textos() {
+        let sql = "CREATE TABLE t (a TEXT, b TEXT CHECK (b IN ('x,y', 'UNIQUE')), UNIQUE (a, b))";
+        let segs = segmentos_da_tabela(sql);
+        assert_eq!(segs.len(), 3, "segmentos: {segs:?}");
+        assert!(segs[1].contains("'x,y'"));
+        assert_eq!(restricoes_tabela(sql).len(), 1);
+        let mut campos = vec![
+            Campo { nome: "a".into(), tipo: "TEXT".into(), ..Default::default() },
+            Campo { nome: "b".into(), tipo: "TEXT".into(), ..Default::default() },
+        ];
+        aplicar_restricoes_inline(&mut campos, sql);
+        assert!(!campos[0].unico, "UNIQUE de tabela não deve virar UNIQUE da coluna");
+        assert!(campos[1].check.contains("'UNIQUE'"), "check: {}", campos[1].check);
     }
 }
 
@@ -446,17 +575,401 @@ fn literal_omissao(t: &str) -> String {
     format!("'{}'", t.replace('\'', "''"))
 }
 
-/// Definição SQL de uma coluna: `"nome" TIPO [PRIMARY KEY] [NOT NULL] [DEFAULT x]`.
+/// Divide o interior de um `CREATE TABLE (...)` por vírgulas de topo, ignorando
+/// textos, identificadores e parênteses internos (expressões CHECK, por exemplo).
+fn segmentos_da_tabela(sql: &str) -> Vec<String> {
+    let b = sql.as_bytes();
+    let mut i = 0;
+    let mut aspas: Option<u8> = None;
+    while i < b.len() {
+        if let Some(q) = aspas {
+            if b[i] == q {
+                if i + 1 < b.len() && b[i + 1] == q {
+                    i += 2;
+                    continue;
+                }
+                aspas = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b[i] {
+            b'\'' | b'"' | b'`' => {
+                aspas = Some(b[i]);
+                i += 1;
+            }
+            b'[' => {
+                aspas = Some(b']');
+                i += 1;
+            }
+            b'(' => break,
+            _ => i += 1,
+        }
+    }
+    if i >= b.len() {
+        return Vec::new();
+    }
+    i += 1; // abre o parêntese da lista de campos
+    let mut out = Vec::new();
+    let mut atual: Vec<u8> = Vec::new();
+    let mut nivel = 1_i32;
+    aspas = None;
+    while i < b.len() {
+        if let Some(q) = aspas {
+            atual.push(b[i]);
+            if b[i] == q {
+                if i + 1 < b.len() && b[i + 1] == q {
+                    atual.push(b[i + 1]);
+                    i += 2;
+                    continue;
+                }
+                aspas = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b[i] {
+            b'\'' | b'"' | b'`' => {
+                aspas = Some(b[i]);
+                atual.push(b[i]);
+                i += 1;
+            }
+            b'[' => {
+                aspas = Some(b']');
+                atual.push(b[i]);
+                i += 1;
+            }
+            b'(' => {
+                nivel += 1;
+                atual.push(b[i]);
+                i += 1;
+            }
+            b')' => {
+                nivel -= 1;
+                if nivel == 0 {
+                    if !atual.iter().all(u8::is_ascii_whitespace) {
+                        out.push(String::from_utf8_lossy(&atual).trim().to_string());
+                    }
+                    break;
+                }
+                atual.push(b[i]);
+                i += 1;
+            }
+            b',' if nivel == 1 => {
+                if !atual.iter().all(u8::is_ascii_whitespace) {
+                    out.push(String::from_utf8_lossy(&atual).trim().to_string());
+                }
+                atual.clear();
+                i += 1;
+            }
+            _ => {
+                atual.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Primeiro identificador de um segmento (`"nome" INTEGER ...`) e o que vem a seguir.
+fn primeiro_ident(s: &str) -> (String, String) {
+    let t = s.trim_start();
+    let mut it = t.chars().peekable();
+    let Some(&primeiro) = it.peek() else {
+        return (String::new(), String::new());
+    };
+    let mut ident = String::new();
+    if matches!(primeiro, '"' | '`' | '\'') {
+        ident.push(it.next().unwrap());
+        while let Some(c) = it.next() {
+            ident.push(c);
+            if c == primeiro {
+                if it.peek() == Some(&primeiro) {
+                    ident.push(it.next().unwrap());
+                    continue;
+                }
+                break;
+            }
+        }
+    } else if primeiro == '[' {
+        ident.push(it.next().unwrap());
+        for c in it.by_ref() {
+            ident.push(c);
+            if c == ']' {
+                break;
+            }
+        }
+    } else {
+        while let Some(&c) = it.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                ident.push(c);
+                it.next();
+            } else {
+                break;
+            }
+        }
+    }
+    (ident, it.collect())
+}
+
+/// Nome de um identificador SQL, sem as aspas envolventes.
+fn dequote_ident(s: &str) -> String {
+    let (ident, _) = primeiro_ident(s);
+    let t = ident.trim();
+    if t.len() >= 2 {
+        let primeiro = t.chars().next().unwrap();
+        let ultimo = t.chars().last().unwrap();
+        if matches!(primeiro, '"' | '`' | '\'') && ultimo == primeiro {
+            let duplo = format!("{primeiro}{primeiro}");
+            return t[1..t.len() - 1].replace(&duplo, &primeiro.to_string());
+        }
+        if primeiro == '[' && ultimo == ']' {
+            return t[1..t.len() - 1].to_string();
+        }
+    }
+    t.to_string()
+}
+
+/// `true` se `s` começa pela palavra `kw` (comparação sem diferenciar maiúsculas).
+fn palavra_no_inicio(s: &str, kw: &str) -> bool {
+    let t = s.trim_start();
+    let n = kw.len();
+    if t.len() < n || !t.as_bytes()[..n].eq_ignore_ascii_case(kw.as_bytes()) {
+        return false;
+    }
+    match t.as_bytes().get(n) {
+        Some(c) => !(c.is_ascii_alphanumeric() || *c == b'_'),
+        None => true,
+    }
+}
+
+/// Remove um `CONSTRAINT <nome>` inicial, para reconhecer o tipo de restrição.
+fn sem_constraint(s: &str) -> String {
+    let t = s.trim_start();
+    if !palavra_no_inicio(t, "CONSTRAINT") {
+        return t.to_string();
+    }
+    let (_, resto) = primeiro_ident(&t["CONSTRAINT".len()..]);
+    resto.trim_start().to_string()
+}
+
+/// Procura uma palavra-chave fora de textos e de parênteses (depth zero).
+fn contem_palavra_fora(s: &str, kw: &str) -> bool {
+    let b = s.as_bytes();
+    let k = kw.as_bytes();
+    let mut i = 0;
+    let mut nivel = 0_i32;
+    let mut aspas: Option<u8> = None;
+    while i < b.len() {
+        if let Some(q) = aspas {
+            if b[i] == q {
+                if i + 1 < b.len() && b[i + 1] == q {
+                    i += 2;
+                    continue;
+                }
+                aspas = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b[i] {
+            b'\'' | b'"' | b'`' => {
+                aspas = Some(b[i]);
+                i += 1;
+                continue;
+            }
+            b'[' => {
+                aspas = Some(b']');
+                i += 1;
+                continue;
+            }
+            b'(' => {
+                nivel += 1;
+                i += 1;
+                continue;
+            }
+            b')' => {
+                nivel -= 1;
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if nivel == 0 && i + k.len() <= b.len() && b[i..i + k.len()].eq_ignore_ascii_case(k) {
+            let antes_ok = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');
+            let fim = i + k.len();
+            let depois_ok = fim >= b.len() || !(b[fim].is_ascii_alphanumeric() || b[fim] == b'_');
+            if antes_ok && depois_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// De um segmento com `CHECK (...)`, devolve só a expressão entre parênteses.
+fn extrair_check(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let k = b"CHECK";
+    let mut i = 0;
+    let mut nivel = 0_i32;
+    let mut aspas: Option<u8> = None;
+    while i < b.len() {
+        if let Some(q) = aspas {
+            if b[i] == q {
+                if i + 1 < b.len() && b[i + 1] == q {
+                    i += 2;
+                    continue;
+                }
+                aspas = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b[i] {
+            b'\'' | b'"' | b'`' => {
+                aspas = Some(b[i]);
+                i += 1;
+                continue;
+            }
+            b'[' => {
+                aspas = Some(b']');
+                i += 1;
+                continue;
+            }
+            b'(' => {
+                nivel += 1;
+                i += 1;
+                continue;
+            }
+            b')' => {
+                nivel -= 1;
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if nivel != 0 || i + k.len() > b.len() || !b[i..i + k.len()].eq_ignore_ascii_case(k) {
+            i += 1;
+            continue;
+        }
+        let antes_ok = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');
+        let fim = i + k.len();
+        let depois_ok = fim >= b.len() || !(b[fim].is_ascii_alphanumeric() || b[fim] == b'_');
+        if !antes_ok || !depois_ok {
+            i += 1;
+            continue;
+        }
+        let mut j = fim;
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if b.get(j) != Some(&b'(') {
+            return None;
+        }
+        let ini = j + 1;
+        let mut d = 1_i32;
+        aspas = None;
+        j = ini;
+        while j < b.len() {
+            if let Some(q) = aspas {
+                if b[j] == q {
+                    if j + 1 < b.len() && b[j + 1] == q {
+                        j += 2;
+                        continue;
+                    }
+                    aspas = None;
+                }
+                j += 1;
+                continue;
+            }
+            match b[j] {
+                b'\'' | b'"' | b'`' => aspas = Some(b[j]),
+                b'[' => aspas = Some(b']'),
+                b'(' => d += 1,
+                b')' => {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(s[ini..j].to_string());
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        return None;
+    }
+    None
+}
+
+/// Lê do `CREATE TABLE` original as restrições UNIQUE/CHECK/AUTOINCREMENT
+/// definidas ao nível de cada coluna e completa os campos do catálogo.
+fn aplicar_restricoes_inline(campos: &mut [Campo], sql: &str) {
+    for seg in segmentos_da_tabela(sql) {
+        let t = seg.trim();
+        // CONSTRAINT/PRIMARY/UNIQUE/CHECK/FOREIGN no início = restrição de tabela.
+        if palavra_no_inicio(t, "CONSTRAINT")
+            || palavra_no_inicio(t, "PRIMARY")
+            || palavra_no_inicio(t, "UNIQUE")
+            || palavra_no_inicio(t, "CHECK")
+            || palavra_no_inicio(t, "FOREIGN")
+        {
+            continue;
+        }
+        let nome = dequote_ident(t);
+        let (_, resto) = primeiro_ident(t);
+        let Some(c) = campos.iter_mut().find(|c| c.nome.eq_ignore_ascii_case(&nome)) else {
+            continue;
+        };
+        if contem_palavra_fora(&resto, "AUTOINCREMENT") {
+            c.autoincrement = true;
+            c.pk = true;
+        }
+        if contem_palavra_fora(&resto, "UNIQUE") {
+            c.unico = true;
+        }
+        if let Some(expr) = extrair_check(&resto) {
+            c.check = expr;
+        }
+    }
+}
+
+/// Restrições de tabela `UNIQUE (...)` e `CHECK (...)` do `CREATE TABLE` original.
+/// As chaves primárias e as relações são regeneradas a partir do catálogo.
+pub(crate) fn restricoes_tabela(sql: &str) -> Vec<String> {
+    segmentos_da_tabela(sql)
+        .into_iter()
+        .filter(|seg| {
+            let t = seg.trim();
+            let alvo = sem_constraint(t);
+            palavra_no_inicio(&alvo, "UNIQUE") || palavra_no_inicio(&alvo, "CHECK")
+        })
+        .map(|seg| seg.trim().to_string())
+        .collect()
+}
+
+/// Definição SQL de uma coluna:
+/// `"nome" TIPO [PRIMARY KEY] [AUTOINCREMENT] [NOT NULL] [UNIQUE] [DEFAULT x] [CHECK (...)] [REFERENCES ...]`.
 fn definicao(c: &Campo, pk_inline: bool) -> String {
     let mut s = format!("{} {}", quote(c.nome.trim()), c.tipo);
     if pk_inline {
         s.push_str(" PRIMARY KEY");
+        if c.autoincrement {
+            s.push_str(" AUTOINCREMENT");
+        }
     }
     if c.obrigatorio {
         s.push_str(" NOT NULL");
     }
+    if c.unico {
+        s.push_str(" UNIQUE");
+    }
     if !c.omissao.trim().is_empty() {
         s.push_str(&format!(" DEFAULT {}", literal_omissao(&c.omissao)));
+    }
+    if !c.check.trim().is_empty() {
+        s.push_str(&format!(" CHECK ({})", c.check.trim()));
     }
     if !c.ref_tabela.trim().is_empty() {
         if c.ref_coluna.trim().is_empty() {
@@ -475,7 +988,47 @@ fn validar_campo(c: &Campo) -> Result<(), String> {
     if !TIPOS.contains(&c.tipo.as_str()) {
         return Err(format!("Tipo de dados desconhecido no campo «{}»", c.nome.trim()));
     }
+    if c.autoincrement && !(c.pk && c.tipo.eq_ignore_ascii_case("INTEGER")) {
+        return Err(format!(
+            "A numeração automática do campo «{}» só é possível numa chave primária INTEGER",
+            c.nome.trim()
+        ));
+    }
+    if !c.check.trim().is_empty() && !parenteses_balanceados(c.check.trim()) {
+        return Err(format!("A verificação do campo «{}» tem parênteses desfechados", c.nome.trim()));
+    }
     Ok(())
+}
+
+/// Confirma que os parênteses de uma expressão CHECK estão fechados (ignora texto entre aspas).
+fn parenteses_balanceados(s: &str) -> bool {
+    let mut nivel = 0_i32;
+    let mut aspas: Option<char> = None;
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if let Some(q) = aspas {
+            if c == q {
+                if it.peek() == Some(&q) {
+                    it.next();
+                } else {
+                    aspas = None;
+                }
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' | '`' => aspas = Some(c),
+            '(' => nivel += 1,
+            ')' => {
+                nivel -= 1;
+                if nivel < 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    nivel == 0 && aspas.is_none()
 }
 
 /// Ações ON UPDATE / ON DELETE das relações de uma tabela, por coluna de origem.
@@ -761,6 +1314,9 @@ impl Database {
                     pk: r.get::<_, i64>(5)? > 0,
                     ref_tabela: String::new(),
                     ref_coluna: String::new(),
+                    unico: false,
+                    check: String::new(),
+                    autoincrement: false,
                 })
             })
             .map_err(traduz)?
@@ -783,11 +1339,22 @@ impl Database {
             .conn
             .query_row("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1", [nome], |r| r.get(0))
             .unwrap_or_default();
+        aplicar_restricoes_inline(&mut campos, &sql);
         Ok((campos, sql))
     }
 
-    /// Cria uma tabela nova a partir da Vista Estrutura.
+    /// Cria uma tabela nova a partir da Vista Estrutura, sem restrições de tabela.
     pub(crate) fn criar_tabela(&self, nome: &str, campos: &[Campo]) -> Result<(), String> {
+        self.criar_tabela_com_restricoes(nome, campos, &[])
+    }
+
+    /// Como `criar_tabela`, com restrições de tabela `UNIQUE (...)` / `CHECK (...)`.
+    pub(crate) fn criar_tabela_com_restricoes(
+        &self,
+        nome: &str,
+        campos: &[Campo],
+        restricoes: &[String],
+    ) -> Result<(), String> {
         let nome = nome.trim();
         if nome.is_empty() {
             return Err("Indique um nome para a tabela".into());
@@ -816,11 +1383,21 @@ impl Database {
             return Err(format!("Já existe um objeto com o nome «{}»", nome));
         }
         let pks: Vec<&Campo> = campos.iter().filter(|c| c.pk).collect();
+        if pks.iter().any(|c| c.autoincrement) && pks.len() != 1 {
+            return Err("A numeração automática só é possível com uma chave primária simples".into());
+        }
         let inline = pks.len() == 1 && pks[0].tipo == "INTEGER";
         let mut defs: Vec<String> = campos.iter().map(|c| definicao(c, inline && c.pk)).collect();
         if !pks.is_empty() && !inline {
             let lista: Vec<String> = pks.iter().map(|c| quote(c.nome.trim())).collect();
             defs.push(format!("PRIMARY KEY ({})", lista.join(", ")));
+        }
+        for r in restricoes {
+            let alvo = sem_constraint(r);
+            if !(palavra_no_inicio(&alvo, "UNIQUE") || palavra_no_inicio(&alvo, "CHECK")) {
+                return Err(format!("Restrição de tabela inválida: «{}»", r.trim()));
+            }
+            defs.push(r.trim().to_string());
         }
         let sql = format!("CREATE TABLE {} (\n  {}\n)", quote(nome), defs.join(",\n  "));
         self.conn.execute_batch(&sql).map_err(traduz)
@@ -830,6 +1407,12 @@ impl Database {
         validar_campo(c)?;
         if c.pk {
             return Err("Não é possível acrescentar uma chave primária a uma tabela existente".into());
+        }
+        if c.autoincrement {
+            return Err("Não é possível acrescentar uma numeração automática a uma tabela existente".into());
+        }
+        if c.unico {
+            return Err("Não é possível acrescentar um campo UNIQUE a uma tabela existente (crie um índice único)".into());
         }
         if c.obrigatorio && c.omissao.trim().is_empty() {
             return Err("Um campo obrigatório precisa de um valor por omissão ao ser acrescentado a uma tabela existente".into());
@@ -852,38 +1435,43 @@ impl Database {
         self.conn.execute_batch(&sql).map_err(traduz)
     }
 
-    /// Altera o tipo, a obrigatoriedade e/ou o valor por omissão de um campo existente.
+    /// Altera o tipo, a obrigatoriedade, o valor por omissão e as restrições
+    /// (`UNIQUE`, `CHECK`, `AUTOINCREMENT`) de um campo existente.
     ///
     /// O SQLite não tem `ALTER COLUMN`: a tabela é recriada dentro de uma transação
-    /// e os dados são copiados. Índices e gatilhos são recriados, e o nome da tabela,
-    /// as chaves estrangeiras e as vistas que a usam ficam intactos. Se qualquer
-    /// passo falhar, a transação é anulada e a tabela original permanece.
-    pub(crate) fn alterar_campo(
-        &self,
-        tabela: &str,
-        nome_campo: &str,
-        tipo: &str,
-        obrigatorio: bool,
-        omissao: &str,
-    ) -> Result<(), String> {
-        let (mut campos, _) = self.info_tabela(tabela)?;
+    /// e os dados são copiados. Índices, gatilhos, chaves primárias, relações,
+    /// restrições de tabela e vistas ficam intactos. Se qualquer passo falhar,
+    /// a transação é anulada e a tabela original permanece.
+    pub(crate) fn alterar_campo(&self, tabela: &str, nome_campo: &str, novo: &Campo) -> Result<(), String> {
+        let (mut campos, sql) = self.info_tabela(tabela)?;
         let Some(i) = campos.iter().position(|c| c.nome.eq_ignore_ascii_case(nome_campo)) else {
             return Err(format!("O campo «{}» não existe na tabela «{}»", nome_campo, tabela));
         };
+        let atual = campos[i].clone();
         let alterado = Campo {
-            tipo: tipo.to_string(),
-            obrigatorio,
-            omissao: omissao.to_string(),
-            ..campos[i].clone()
+            nome: atual.nome.clone(),
+            tipo: novo.tipo.clone(),
+            obrigatorio: novo.obrigatorio,
+            omissao: novo.omissao.clone(),
+            pk: atual.pk,
+            ref_tabela: atual.ref_tabela.clone(),
+            ref_coluna: atual.ref_coluna.clone(),
+            unico: novo.unico,
+            check: novo.check.clone(),
+            autoincrement: novo.autoincrement,
         };
         validar_campo(&alterado)?;
         campos[i] = alterado;
+        let pks: Vec<&Campo> = campos.iter().filter(|c| c.pk).collect();
+        if pks.iter().any(|c| c.autoincrement) && pks.len() != 1 {
+            return Err("A numeração automática só é possível com uma chave primária simples".into());
+        }
 
         // As ações ON DELETE/ON UPDATE não estão em `Campo`: lê-se do catálogo
         // para não mudar o comportamento das relações ao recriar a tabela.
         let acoes = acoes_fk(&self.conn, tabela);
         let objetos = objetos_da_tabela(&self.conn, tabela)?;
-        let pks: Vec<&Campo> = campos.iter().filter(|c| c.pk).collect();
+        let restricoes = restricoes_tabela(&sql);
         let inline = pks.len() == 1 && pks[0].tipo.eq_ignore_ascii_case("INTEGER");
         let mut defs: Vec<String> = campos
             .iter()
@@ -906,6 +1494,7 @@ impl Database {
             let lista: Vec<String> = pks.iter().map(|c| quote(c.nome.trim())).collect();
             defs.push(format!("PRIMARY KEY ({})", lista.join(", ")));
         }
+        defs.extend(restricoes);
 
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
