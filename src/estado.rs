@@ -1,6 +1,6 @@
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, Response, Stroke, Ui, Vec2};
+use eframe::egui::{self, FontId, Pos2, Rect, Stroke};
 use std::path::PathBuf;
-use crate::{db::{Condicao, Database, TableData}, icones::*, tema::*, widgets::*};
+use crate::{db::{Condicao, Database, TableData}, icones::*, tema::*};
 // ───────────────────────────── Estado da aplicação ─────────────────────────────
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum ObjKind {
@@ -57,7 +57,7 @@ impl Doc {
 /// `true` se o foco do teclado está numa caixa de texto que o programa conhece.
 pub(crate) fn a_escrever(ctx: &egui::Context) -> bool {
     ctx.memory(|m| {
-        matches!(m.focused(), Some(id) if ["nav_filter", "rec_search", "sql_editor", "nome_consulta", "nome_objeto", "filtro_texto", "csv_nome_novo"]
+        matches!(m.focused(), Some(id) if ["nav_filter", "rec_search", "sql_editor", "nome_consulta", "nome_objeto", "filtro_texto", "csv_nome_novo", "nome_indice"]
             .iter()
             .any(|n| id == egui::Id::new(*n)))
     })
@@ -86,7 +86,6 @@ pub(crate) struct AccessApp {
     pub(crate) docs: Vec<Doc>,
     pub(crate) active: usize,
     pub(crate) sel: (usize, usize),
-    pub(crate) dropdown: Option<(&'static str, Rect)>,
     pub(crate) rec_search: String,
     pub(crate) new_db_name: String,
     pub(crate) db_path: String,
@@ -110,6 +109,16 @@ pub(crate) struct AccessApp {
     pub(crate) focar_busca: bool,
     pub(crate) importar: Option<crate::csvio::ImportCsv>,
     pub(crate) exportar_csv: Option<crate::csvio::ExportCsv>,
+    /// Histórico para Desfazer/Refazer (cada entrada é um passo, com várias ações se for preciso).
+    pub(crate) undo: Vec<Vec<crate::desfazer::Acao>>,
+    pub(crate) redo: Vec<Vec<crate::desfazer::Acao>>,
+    pub(crate) hist_pend: Vec<crate::desfazer::Acao>,
+    /// Pedido do ribbon para a folha de dados: 0 = copiar, 1 = cortar.
+    pub(crate) clip_acao: Option<u8>,
+    pub(crate) totais_aberto: bool,
+    pub(crate) indices: Option<crate::indices::EstIndices>,
+    pub(crate) relacoes: Option<crate::relacoes::EstRelacoes>,
+    pub(crate) eliminar_obj: Option<crate::eliminar_obj::EliminarObj>,
 }
 impl AccessApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -140,7 +149,6 @@ impl AccessApp {
             docs: Vec::new(),
             active: 0,
             sel: (0, 1),
-            dropdown: None,
             rec_search: String::new(),
             new_db_name: "Base1.accsql".into(),
             db_path: String::new(),
@@ -160,6 +168,14 @@ impl AccessApp {
             focar_busca: false,
             importar: None,
             exportar_csv: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            hist_pend: Vec::new(),
+            clip_acao: None,
+            totais_aberto: false,
+            indices: None,
+            relacoes: None,
+            eliminar_obj: None,
         };
         app.refresh_nav();
         app
@@ -176,33 +192,6 @@ impl AccessApp {
             NavGroup { name: "Consultas", kind: ObjKind::Query, items: consultas },
         ];
         self.nav_sel = None;
-    }
-    pub(crate) fn act(&mut self, resp: &Response, label: &str, dd: Option<&'static str>) {
-        if resp.clicked() {
-            match dd {
-                Some(k) => {
-                    if matches!(self.dropdown, Some((kk, _)) if kk == k) {
-                        self.dropdown = None;
-                    } else {
-                        self.dropdown = Some((k, resp.rect));
-                    }
-                }
-                None => self.msg = format!("«{}» – apenas apresentação visual", label.replace('\n', " ")),
-            }
-        }
-    }
-    pub(crate) fn rb(&mut self, ui: &mut Ui, icon: Icon, label: &str, dd: Option<&'static str>) {
-        let r = big_btn(ui, icon, label, dd.is_some());
-        self.act(&r, label, dd);
-    }
-    pub(crate) fn stack(&mut self, ui: &mut Ui, items: &[(Icon, &str, Option<&'static str>)]) {
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::ZERO;
-            for (ic, l, dd) in items {
-                let r = small_btn(ui, *ic, l, dd.is_some());
-                self.act(&r, l, *dd);
-            }
-        });
     }
     /// Índice do separador aberto do objeto `nome`, seja qual for o modo em que está
     /// (dados, estrutura ou SQL): cada objeto só tem um separador.

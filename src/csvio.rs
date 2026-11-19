@@ -186,9 +186,6 @@ fn inferir_tipo(linhas: &[Vec<String>], col: usize, virgula: bool) -> &'static s
                 }
             }
         }
-        if !inteiro && !real {
-            break;
-        }
     }
     real &= algum;
     if !algum {
@@ -205,6 +202,19 @@ fn inferir_tipo(linhas: &[Vec<String>], col: usize, virgula: bool) -> &'static s
 fn numerica(tipo: &str) -> bool {
     let t = tipo.to_ascii_uppercase();
     t.contains("INT") || t.contains("REAL") || t.contains("FLOA") || t.contains("DOUB") || t.contains("NUMERIC") || t.contains("DECIMAL")
+}
+
+/// Valida todas as linhas importadas antes de as inserir (a importação é uma transação).
+fn validar_linhas(campos: &[Campo], mapa: &[(usize, String, bool)], dados: &[Vec<String>]) -> Result<(), String> {
+    for &(ci, ref nome, _) in mapa {
+        let Some(campo) = campos.iter().find(|f| f.nome.eq_ignore_ascii_case(nome)) else { continue };
+        for (k, linha) in dados.iter().enumerate() {
+            let valor = linha.get(ci).map(String::as_str).unwrap_or("");
+            crate::validacao::validar(&campo.tipo, campo.obrigatorio, valor, nome)
+                .map_err(|m| format!("Linha {} de dados: {}", k + 1, m))?;
+        }
+    }
+    Ok(())
 }
 
 fn nomes_campos(cab: Option<&Vec<String>>, n: usize) -> Vec<String> {
@@ -322,7 +332,7 @@ impl AccessApp {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.label("Separador:");
-                    egui::ComboBox::from_id_source("csv_exp_sep")
+                    egui::ComboBox::from_id_salt("csv_exp_sep")
                         .width(150.0)
                         .selected_text(nome_sep(e.sep))
                         .show_ui(ui, |ui| {
@@ -382,7 +392,7 @@ impl AccessApp {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label("Separador:");
-                    egui::ComboBox::from_id_source("csv_sep")
+                    egui::ComboBox::from_id_salt("csv_sep")
                         .width(150.0)
                         .selected_text(nome_sep(imp.sep))
                         .show_ui(ui, |ui| {
@@ -401,7 +411,7 @@ impl AccessApp {
                 ui.horizontal(|ui| {
                     ui.add_enabled_ui(!tabelas.is_empty(), |ui| {
                         ui.radio_value(&mut imp.novo, false, "Acrescentar à tabela:");
-                        egui::ComboBox::from_id_source("csv_dest")
+                        egui::ComboBox::from_id_salt("csv_dest")
                             .width(180.0)
                             .selected_text(tabelas.get(imp.destino).cloned().unwrap_or_default())
                             .show_ui(ui, |ui| {
@@ -415,7 +425,7 @@ impl AccessApp {
                 let ncols = imp.linhas.iter().map(|l| l.len()).max().unwrap_or(0);
                 let dados = imp.linhas.len().saturating_sub(if imp.cabecalho { 1 } else { 0 });
                 ui.label(format!("{} linha(s) de dados, {} coluna(s). Pré-visualização:", dados, ncols));
-                egui::ScrollArea::both().id_source("csv_prev_scroll").max_height(170.0).show(ui, |ui| {
+                egui::ScrollArea::both().id_salt("csv_prev_scroll").max_height(170.0).show(ui, |ui| {
                     egui::Grid::new("csv_prev").striped(true).spacing([14.0, 4.0]).show(ui, |ui| {
                         for (ri, l) in imp.linhas.iter().take(7).enumerate() {
                             for c in l.iter().take(10) {
@@ -482,6 +492,7 @@ impl AccessApp {
                 .collect();
             let mapa: Vec<(usize, String, bool)> =
                 (0..ncols).map(|i| (i, nomes[i].clone(), tipos[i] != "TEXT")).collect();
+            validar_linhas(&campos, &mapa, dados)?;
             let nome = imp.nome_novo.trim().to_string();
             let n = {
                 let db = self.db.as_ref().ok_or("Nenhuma base de dados aberta")?;
@@ -494,6 +505,7 @@ impl AccessApp {
                     }
                 }
             };
+            self.limpar_historico();
             self.refresh_nav();
             self.open_doc(ObjKind::Table, nome.clone());
             Ok(format!("Importadas {} linha(s) para a tabela nova «{}»", n, nome))
@@ -516,11 +528,13 @@ impl AccessApp {
             if mapa.is_empty() {
                 return Err("Nenhuma coluna do ficheiro corresponde a campos da tabela (compare os nomes)".into());
             }
+            validar_linhas(&campos, &mapa, dados)?;
             let n = self
                 .db
                 .as_ref()
                 .ok_or("Nenhuma base de dados aberta")?
                 .inserir_linhas(&destino, &mapa, dados, imp.virgula)?;
+            self.limpar_historico();
             self.recarregar_abertos(&destino);
             let ignoradas = ncols - mapa.len().min(ncols);
             let extra = if ignoradas > 0 { format!(" ({} coluna(s) do ficheiro sem campo correspondente foram ignoradas)", ignoradas) } else { String::new() };

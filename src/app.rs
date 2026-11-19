@@ -1,5 +1,5 @@
 use eframe::egui;
-use crate::{backstage::*, estado::{a_escrever, AccessApp}, menus::*, navegacao::*, ribbon::*, area_trabalho::*, status::*};
+use crate::estado::{a_escrever, AccessApp};
 
 impl eframe::App for AccessApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -26,13 +26,16 @@ impl eframe::App for AccessApp {
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.backstage = false;
-            self.dropdown = None;
             self.confirm_del = None;
             self.pedir_nome = None;
             self.renomear_obj = None;
             self.menu_col = None;
             self.importar = None;
             self.exportar_csv = None;
+            self.totais_aberto = false;
+            self.indices = None;
+            self.relacoes = None;
+            self.eliminar_obj = None;
         }
         // o último clique decide a quem pertence o F2: painel de navegação ou área de trabalho
         if ctx.input(|i| i.pointer.primary_pressed()) {
@@ -46,6 +49,15 @@ impl eframe::App for AccessApp {
             && ctx.input(|i| i.key_pressed(egui::Key::F2))
         {
             self.pedir_renomear_nav();
+        }
+        // Delete no painel de navegação: eliminar a tabela ou consulta selecionada (com confirmação)
+        if self.foco_nav
+            && self.eliminar_obj.is_none()
+            && self.renomear_obj.is_none()
+            && !a_escrever(ctx)
+            && ctx.input(|i| i.key_pressed(egui::Key::Delete))
+        {
+            self.pedir_eliminar_nav();
         }
         self.qat(ctx);
         self.tab_strip(ctx);
@@ -62,8 +74,11 @@ impl eframe::App for AccessApp {
             self.desenhar_menu_col(ctx);
             self.dialogo_importar_csv(ctx);
             self.dialogo_exportar_csv(ctx);
+            self.desenhar_totais(ctx);
+            self.dialogo_indices(ctx);
+            self.dialogo_relacoes(ctx);
+            self.dialogo_eliminar_obj(ctx);
         }
-        self.show_dropdown(ctx);
         // X11/XIM: com o método de entrada (IME) ativo, o Backspace e as setas são
         // "engolidos" antes de chegarem ao egui. Retirar o IME no fim de cada frame
         // (depois de as caixas de texto o terem pedido) resolve-o.

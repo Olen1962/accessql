@@ -1,5 +1,5 @@
-use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
-use crate::{estado::*, icones::*, tema::*, widgets::*};
+use eframe::egui::{self, Align2, Color32, FontId, Frame, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use crate::{estado::*, icones::*, tema::*};
 impl AccessApp {
 // ───────────── Painel de navegação ─────────────
     pub(crate) fn nav_pane(&mut self, ctx: &egui::Context) {
@@ -7,18 +7,17 @@ impl AccessApp {
         let mut to_sql: Option<String> = None;
         let mut to_estr: Option<String> = None;
         let mut to_ren: Option<(ObjKind, String)> = None;
+        let mut to_del: Option<(ObjKind, String)> = None;
         let nav_resp = egui::SidePanel::left("nav")
             .resizable(true)
             .default_width(230.0)
             .width_range(170.0..=420.0)
             .frame(Frame::none().fill(NAV_BG))
             .show(ctx, |ui| {
-                let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 27.0), Sense::click());
+                let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 27.0), Sense::hover());
                 let p = ui.painter().clone();
                 p.rect_filled(r, 0.0, NAV_HEAD);
                 p.text(Pos2::new(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, "Todos os Objetos", FontId::proportional(13.0), TEXT);
-                down_arrow(&p, Pos2::new(r.right() - 14.0, r.center().y), TEXT);
-                self.act(&resp, "Categoria", Some("navcat"));
                 Frame::none().inner_margin(Margin::same(4.0)).show(ui, |ui| {
                     let w = ui.available_width();
                     ui.add(egui::TextEdit::singleline(&mut self.nav_filter).id(egui::Id::new("nav_filter")).hint_text("Procurar...").desired_width(w));
@@ -78,6 +77,10 @@ impl AccessApp {
                                     to_ren = Some((kind, name.to_string()));
                                     ui.close_menu();
                                 }
+                                if ui.button("Eliminar (Delete)").clicked() {
+                                    to_del = Some((kind, name.to_string()));
+                                    ui.close_menu();
+                                }
                                 if kind == ObjKind::Table && ui.button("Vista Estrutura").clicked() {
                                     to_estr = Some(name.to_string());
                                     ui.close_menu();
@@ -108,6 +111,9 @@ impl AccessApp {
         }
         if let Some((k, n)) = to_ren {
             self.renomear_obj = Some((k, n.clone(), n));
+        }
+        if let Some((k, n)) = to_del {
+            self.pedir_eliminar_objeto(k, n);
         }
     }
 }

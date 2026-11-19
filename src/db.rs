@@ -8,6 +8,10 @@ use std::path::Path;
 pub(crate) struct TableData {
     /// Cada coluna: (nome, largura em píxeis na folha de dados).
     pub(crate) cols: Vec<(String, f32)>,
+    /// Tipo declarado de cada coluna (vazio quando o SQLite não o conhece).
+    pub(crate) tipos: Vec<String>,
+    /// `true` nas colunas `NOT NULL`.
+    pub(crate) obrig: Vec<bool>,
     pub(crate) rows: Vec<Vec<String>>,
     /// `rowid` de cada linha (só em tabelas editáveis; vazio em consultas).
     pub(crate) rowids: Vec<i64>,
@@ -25,6 +29,28 @@ pub(crate) struct Campo {
     pub(crate) obrigatorio: bool,
     pub(crate) omissao: String,
     pub(crate) pk: bool,
+    /// Chave estrangeira: tabela e campo a que este campo se refere (vazios = nenhuma).
+    pub(crate) ref_tabela: String,
+    pub(crate) ref_coluna: String,
+}
+
+/// Uma relação (chave estrangeira) entre duas tabelas.
+pub(crate) struct Relacao {
+    pub(crate) tabela: String,
+    pub(crate) colunas: String,
+    pub(crate) ref_tabela: String,
+    pub(crate) ref_colunas: String,
+    pub(crate) ao_apagar: String,
+    pub(crate) ao_atualizar: String,
+}
+
+/// Um índice de uma tabela.
+pub(crate) struct Indice {
+    pub(crate) nome: String,
+    pub(crate) unico: bool,
+    /// `c` = criado com CREATE INDEX, `u` = restrição UNIQUE, `pk` = chave primária.
+    pub(crate) origem: String,
+    pub(crate) colunas: Vec<String>,
 }
 
 /// Tipos de dados oferecidos (nomes declarados do SQLite).
@@ -50,10 +76,12 @@ pub(crate) fn quote(id: &str) -> String {
 }
 
 /// Mensagens de erro do SQLite em português, para a barra de estado.
-fn traduz(e: rusqlite::Error) -> String {
+pub(crate) fn traduz(e: rusqlite::Error) -> String {
     let s = e.to_string();
     if s.contains("not a database") || s.contains("encrypted") {
         "O ficheiro não é uma base de dados SQLite válida".into()
+    } else if s.contains("FOREIGN KEY constraint failed") {
+        "Viola uma relação: o valor não existe na tabela relacionada, ou há registos que dependem deste".into()
     } else if s.contains("unable to open") {
         "Não foi possível abrir o ficheiro (confirme o caminho e as permissões)".into()
     } else {
@@ -63,7 +91,7 @@ fn traduz(e: rusqlite::Error) -> String {
 
 /// Texto vazio grava-se como NULL (como no Access); o resto como texto.
 /// O SQLite converte para número se a coluna tiver afinidade numérica.
-fn valor(t: &str) -> Value {
+pub(crate) fn valor(t: &str) -> Value {
     if t.is_empty() {
         Value::Null
     } else {
@@ -183,7 +211,25 @@ fn ler(stmt: &mut Statement, skip: usize, com_rowid: bool, limite: usize, params
             (nome, (max as f32 * 7.2 + 26.0).clamp(70.0, 320.0))
         })
         .collect();
-    Ok(TableData { cols, rows: rows_out, rowids, editable: com_rowid, truncado })
+    Ok(TableData { cols, tipos: Vec::new(), obrig: Vec::new(), rows: rows_out, rowids, editable: com_rowid, truncado })
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn metadados_da_tabela_chegam_a_folha_de_dados() {
+        let db = Database::demo().unwrap();
+        let (campos, _) = db.info_tabela("Clientes").unwrap();
+        let id = campos.iter().find(|c| c.nome == "ID").unwrap();
+        assert!(id.tipo.contains("INT"), "tipo de ID: {}", id.tipo);
+        let dados = db.load("Clientes", true).unwrap();
+        assert_eq!(dados.tipos.len(), dados.cols.len());
+        assert_eq!(dados.obrig.len(), dados.cols.len());
+        let i = dados.cols.iter().position(|c| c.0 == "ID").unwrap();
+        assert!(dados.tipos[i].contains("INT"));
+    }
 }
 
 /// Divide um script em instruções, respeitando textos, identificadores e comentários.
@@ -318,6 +364,13 @@ fn definicao(c: &Campo, pk_inline: bool) -> String {
     if !c.omissao.trim().is_empty() {
         s.push_str(&format!(" DEFAULT {}", literal_omissao(&c.omissao)));
     }
+    if !c.ref_tabela.trim().is_empty() {
+        if c.ref_coluna.trim().is_empty() {
+            s.push_str(&format!(" REFERENCES {}", quote(c.ref_tabela.trim())));
+        } else {
+            s.push_str(&format!(" REFERENCES {}({})", quote(c.ref_tabela.trim()), quote(c.ref_coluna.trim())));
+        }
+    }
     s
 }
 
@@ -342,6 +395,7 @@ impl Database {
         .map_err(traduz)?;
         conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get::<_, i64>(0))
             .map_err(traduz)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;").map_err(traduz)?;
         Ok(Self { conn })
     }
 
@@ -351,7 +405,7 @@ impl Database {
             return Err(format!("Já existe um ficheiro com esse nome: {}", path.display()));
         }
         let conn = Connection::open(path).map_err(traduz)?;
-        conn.execute_batch("PRAGMA user_version = 1;").map_err(traduz)?;
+        conn.execute_batch("PRAGMA user_version = 1; PRAGMA foreign_keys = ON;").map_err(traduz)?;
         Ok(Self { conn })
     }
 
@@ -402,6 +456,7 @@ impl Database {
              CREATE VIEW \"Produtos em Falta\" AS \
                  SELECT * FROM Produtos WHERE Stock < 20;",
         )?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         Ok(Self { conn })
     }
 
@@ -467,7 +522,17 @@ impl Database {
             sql.push_str(&format!(" ORDER BY {} COLLATE NOCASE {}", quote(col), if asc { "ASC" } else { "DESC" }));
         }
         let mut stmt = self.conn.prepare(&sql)?;
-        ler(&mut stmt, if com_rowid { 1 } else { 0 }, com_rowid, usize::MAX, &params)
+        let mut dados = ler(&mut stmt, if com_rowid { 1 } else { 0 }, com_rowid, usize::MAX, &params)?;
+        // Tipos e obrigatoriedade vêm do catálogo da tabela; em consultas e vistas
+        // ficam vazios (essas grelhas não são editáveis).
+        if com_rowid {
+            if let Ok((campos, _)) = self.info_tabela(name) {
+                let achar = |n: &str| campos.iter().find(|c| c.nome.eq_ignore_ascii_case(n));
+                dados.tipos = dados.cols.iter().map(|(n, _)| achar(n).map(|c| c.tipo.clone()).unwrap_or_default()).collect();
+                dados.obrig = dados.cols.iter().map(|(n, _)| achar(n).map(|c| c.obrigatorio).unwrap_or(false)).collect();
+            }
+        }
+        Ok(dados)
     }
 
     /// Executa um script SQL (uma ou mais instruções). Mostra o resultado da última
@@ -518,8 +583,14 @@ impl Database {
         }
         {
             let stmt = self.conn.prepare(corpo).map_err(traduz)?;
-            if stmt.column_count() == 0 {
-                return Err("Só consultas que devolvem dados (SELECT) podem ser guardadas".into());
+            let primeiro = corpo
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_start_matches('(')
+                .to_ascii_uppercase();
+            if (primeiro != "SELECT" && primeiro != "WITH") || stmt.column_count() == 0 {
+                return Err("Só consultas SELECT podem ser guardadas como Consulta".into());
             }
         }
         let existe: i64 = self
@@ -587,11 +658,26 @@ impl Database {
                     obrigatorio: r.get::<_, i64>(3)? != 0,
                     omissao: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
                     pk: r.get::<_, i64>(5)? > 0,
+                    ref_tabela: String::new(),
+                    ref_coluna: String::new(),
                 })
             })
             .map_err(traduz)?
             .collect::<rusqlite::Result<Vec<Campo>>>()
             .map_err(traduz)?;
+        let mut campos = campos;
+        if let Ok(mut fk) = self.conn.prepare(&format!("PRAGMA foreign_key_list({})", quote(nome))) {
+            if let Ok(it) = fk.query_map([], |r| {
+                Ok((r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, Option<String>>(4)?))
+            }) {
+                for (tab, de, para) in it.flatten() {
+                    if let Some(c) = campos.iter_mut().find(|c| c.nome == de) {
+                        c.ref_tabela = tab;
+                        c.ref_coluna = para.unwrap_or_default();
+                    }
+                }
+            }
+        }
         let sql: String = self
             .conn
             .query_row("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1", [nome], |r| r.get(0))
@@ -713,6 +799,17 @@ impl Database {
         linhas: &[Vec<String>],
         virgula: bool,
     ) -> Result<usize, String> {
+        self.inserir_linhas_ids(tabela, mapa, linhas, virgula).map(|v| v.len())
+    }
+
+    /// Como `inserir_linhas`, mas devolve o `rowid` de cada registo criado.
+    pub(crate) fn inserir_linhas_ids(
+        &self,
+        tabela: &str,
+        mapa: &[(usize, String, bool)],
+        linhas: &[Vec<String>],
+        virgula: bool,
+    ) -> Result<Vec<i64>, String> {
         if mapa.is_empty() {
             return Err("Nenhuma coluna do ficheiro corresponde a campos da tabela".into());
         }
@@ -720,7 +817,7 @@ impl Database {
         let marcas = vec!["?"; mapa.len()].join(", ");
         let sql = format!("INSERT INTO {} ({}) VALUES ({})", quote(tabela), cols.join(", "), marcas);
         let tx = self.conn.unchecked_transaction().map_err(traduz)?;
-        let mut n = 0usize;
+        let mut ids: Vec<i64> = Vec::new();
         {
             let mut stmt = tx.prepare(&sql).map_err(traduz)?;
             for (k, l) in linhas.iter().enumerate() {
@@ -740,14 +837,262 @@ impl Database {
                     .collect();
                 stmt.execute(params_from_iter(vals.iter()))
                     .map_err(|e| format!("Linha {} de dados: {}", k + 1, traduz(e)))?;
-                n += 1;
+                ids.push(tx.last_insert_rowid());
             }
         }
         tx.commit().map_err(traduz)?;
-        Ok(n)
+        Ok(ids)
     }
 
     pub(crate) fn eliminar_tabela(&self, nome: &str) -> Result<(), String> {
         self.conn.execute_batch(&format!("DROP TABLE {}", quote(nome))).map_err(traduz)
     }
+
+    /// Valor guardado numa célula, tal como está na base de dados (para desfazer).
+    pub(crate) fn valor_bruto(&self, tabela: &str, col: &str, rowid: i64) -> Result<Value, String> {
+        self.conn
+            .query_row(
+                &format!("SELECT {} FROM {} WHERE rowid = ?1", quote(col), quote(tabela)),
+                [rowid],
+                |r| r.get::<_, Value>(0),
+            )
+            .map_err(traduz)
+    }
+
+    /// Registo completo (nomes e valores) tal como está na base de dados.
+    pub(crate) fn registo_bruto(&self, tabela: &str, rowid: i64) -> Result<(Vec<String>, Vec<Value>), String> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("SELECT * FROM {} WHERE rowid = ?1", quote(tabela)))
+            .map_err(traduz)?;
+        let nomes: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
+        let mut rows = stmt.query([rowid]).map_err(traduz)?;
+        match rows.next().map_err(traduz)? {
+            Some(r) => {
+                let mut v = Vec::with_capacity(nomes.len());
+                for i in 0..nomes.len() {
+                    v.push(r.get::<_, Value>(i).map_err(traduz)?);
+                }
+                Ok((nomes, v))
+            }
+            None => Err("Registo não encontrado".into()),
+        }
+    }
+
+    pub(crate) fn definir_celula(&self, tabela: &str, col: &str, rowid: i64, v: &Value) -> Result<(), String> {
+        let sql = format!("UPDATE {} SET {} = ?1 WHERE rowid = ?2", quote(tabela), quote(col));
+        self.conn.execute(&sql, params![v, rowid]).map_err(traduz)?;
+        Ok(())
+    }
+
+    /// Repõe um registo com o mesmo `rowid` (desfazer uma eliminação).
+    pub(crate) fn inserir_bruto(&self, tabela: &str, rowid: i64, colunas: &[String], valores: &[Value]) -> Result<(), String> {
+        // se o campo de chave é INTEGER PRIMARY KEY já faz parte das colunas e dá o rowid
+        let alias = self.info_tabela(tabela).ok().map_or(false, |(campos, _)| {
+            let pks: Vec<&Campo> = campos.iter().filter(|c| c.pk).collect();
+            pks.len() == 1 && pks[0].tipo.eq_ignore_ascii_case("INTEGER") && colunas.iter().any(|c| *c == pks[0].nome)
+        });
+        let mut nomes: Vec<String> = colunas.iter().map(|c| quote(c)).collect();
+        let mut todos: Vec<Value> = valores.to_vec();
+        if !alias {
+            nomes.insert(0, "rowid".to_string());
+            todos.insert(0, Value::Integer(rowid));
+        }
+        let marcas = vec!["?"; todos.len()].join(", ");
+        let sql = format!("INSERT INTO {} ({}) VALUES ({})", quote(tabela), nomes.join(", "), marcas);
+        self.conn.execute(&sql, params_from_iter(todos.iter())).map_err(traduz)?;
+        Ok(())
+    }
+
+    pub(crate) fn lista_indices(&self, tabela: &str) -> Result<Vec<Indice>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("PRAGMA index_list({})", quote(tabela)))
+            .map_err(traduz)?;
+        let base: Vec<(String, bool, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, i64>(2)? != 0, r.get::<_, String>(3)?)))
+            .map_err(traduz)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(traduz)?;
+        let mut out = Vec::new();
+        for (nome, unico, origem) in base {
+            let mut st = self
+                .conn
+                .prepare(&format!("PRAGMA index_info({})", quote(&nome)))
+                .map_err(traduz)?;
+            let colunas: Vec<String> = st
+                .query_map([], |r| r.get::<_, Option<String>>(2))
+                .map_err(traduz)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(traduz)?
+                .into_iter()
+                .map(|c| c.unwrap_or_else(|| "(expressão)".to_string()))
+                .collect();
+            out.push(Indice { nome, unico, origem, colunas });
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn criar_indice(&self, nome: &str, tabela: &str, colunas: &[String], unico: bool) -> Result<(), String> {
+        if colunas.is_empty() {
+            return Err("Escolha pelo menos um campo para o índice".into());
+        }
+        let nome = nome.trim();
+        if nome.is_empty() {
+            return Err("Indique um nome para o índice".into());
+        }
+        let existe: i64 = self
+            .conn
+            .query_row("SELECT count(*) FROM sqlite_master WHERE name = ?1 COLLATE NOCASE", [nome], |r| r.get(0))
+            .map_err(traduz)?;
+        if existe > 0 {
+            return Err(format!("Já existe um objeto com o nome «{}»", nome));
+        }
+        let lista: Vec<String> = colunas.iter().map(|c| quote(c)).collect();
+        let sql = format!(
+            "CREATE {}INDEX {} ON {} ({})",
+            if unico { "UNIQUE " } else { "" },
+            quote(nome),
+            quote(tabela),
+            lista.join(", ")
+        );
+        self.conn.execute_batch(&sql).map_err(traduz)
+    }
+
+    pub(crate) fn eliminar_indice(&self, nome: &str) -> Result<(), String> {
+        self.conn.execute_batch(&format!("DROP INDEX {}", quote(nome))).map_err(traduz)
+    }
+
+    pub(crate) fn foreign_keys_ativas(&self) -> bool {
+        self.conn.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0)).map_or(false, |v| v != 0)
+    }
+
+    pub(crate) fn definir_foreign_keys(&self, ligar: bool) -> Result<(), String> {
+        self.conn
+            .execute_batch(if ligar { "PRAGMA foreign_keys = ON;" } else { "PRAGMA foreign_keys = OFF;" })
+            .map_err(traduz)
+    }
+
+    /// Todas as chaves estrangeiras da base de dados (as compostas aparecem numa só linha).
+    pub(crate) fn lista_relacoes(&self) -> Result<Vec<Relacao>, String> {
+        let mut out: Vec<Relacao> = Vec::new();
+        for tabela in self.list_tables().map_err(traduz)? {
+            let mut stmt = self
+                .conn
+                .prepare(&format!("PRAGMA foreign_key_list({})", quote(&tabela)))
+                .map_err(traduz)?;
+            let linhas: Vec<(i64, String, String, Option<String>, String, String)> = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, String>(6)?,
+                    ))
+                })
+                .map_err(traduz)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(traduz)?;
+            let mut ids: Vec<i64> = Vec::new();
+            let mut parcial: Vec<Relacao> = Vec::new();
+            for (id, ref_t, de, para, on_upd, on_del) in linhas {
+                let para = para.unwrap_or_else(|| "(chave primária)".to_string());
+                if let Some(p) = ids.iter().position(|x| *x == id) {
+                    parcial[p].colunas.push_str(&format!(", {}", de));
+                    parcial[p].ref_colunas.push_str(&format!(", {}", para));
+                } else {
+                    ids.push(id);
+                    parcial.push(Relacao {
+                        tabela: tabela.clone(),
+                        colunas: de,
+                        ref_tabela: ref_t,
+                        ref_colunas: para,
+                        ao_apagar: on_del,
+                        ao_atualizar: on_upd,
+                    });
+                }
+            }
+            out.extend(parcial);
+        }
+        Ok(out)
+    }
+
+    /// Registos que referem valores inexistentes (`PRAGMA foreign_key_check`).
+    pub(crate) fn verificar_relacoes(&self) -> Result<Vec<String>, String> {
+        let mut stmt = self.conn.prepare("PRAGMA foreign_key_check").map_err(traduz)?;
+        let v: Vec<String> = stmt
+            .query_map([], |r| {
+                Ok(format!(
+                    "{}: o registo {} refere um valor que não existe em {}",
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<i64>>(1)?.map_or("?".to_string(), |n| n.to_string()),
+                    r.get::<_, String>(2)?
+                ))
+            })
+            .map_err(traduz)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(traduz)?;
+        Ok(v.into_iter().take(200).collect())
+    }
+
+    /// Campos a que se pode ligar uma chave estrangeira: as chaves primárias simples.
+    pub(crate) fn opcoes_fk(&self) -> Result<Vec<(String, String)>, String> {
+        let mut out = Vec::new();
+        for t in self.list_tables().map_err(traduz)? {
+            if let Ok((campos, _)) = self.info_tabela(&t) {
+                let pks: Vec<&Campo> = campos.iter().filter(|c| c.pk).collect();
+                if pks.len() == 1 {
+                    out.push((t.clone(), pks[0].nome.clone()));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn contar_registos(&self, tabela: &str) -> Result<i64, String> {
+        self.conn
+            .query_row(&format!("SELECT count(*) FROM {}", quote(tabela)), [], |r| r.get::<_, i64>(0))
+            .map_err(traduz)
+    }
+
+    /// Consultas guardadas cujo texto menciona `nome` (deixam de funcionar se ele desaparecer).
+    pub(crate) fn consultas_que_mencionam(&self, nome: &str) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'view' AND name <> ?1 COLLATE NOCASE ORDER BY name COLLATE NOCASE")
+            .map_err(traduz)?;
+        let it = stmt
+            .query_map([nome], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))
+            .map_err(traduz)?;
+        Ok(it.flatten().filter(|(_, sql)| menciona(sql, nome)).map(|(n, _)| n).collect())
+    }
+
+    /// Elimina uma tabela (com os seus índices) ou uma consulta guardada.
+    pub(crate) fn eliminar_objeto(&self, tabela: bool, nome: &str) -> Result<(), String> {
+        let sql = format!("DROP {} {}", if tabela { "TABLE" } else { "VIEW" }, quote(nome));
+        self.conn.execute_batch(&sql).map_err(traduz)
+    }
+}
+
+/// `true` se `sql` contém `nome` como palavra inteira (sem letras, dígitos ou `_` ao lado).
+fn menciona(sql: &str, nome: &str) -> bool {
+    let s = sql.to_lowercase();
+    let n = nome.to_lowercase();
+    if n.is_empty() {
+        return false;
+    }
+    let mut desde = 0;
+    while let Some(p) = s[desde..].find(&n) {
+        let ini = desde + p;
+        let fim = ini + n.len();
+        let antes_ok = s[..ini].chars().next_back().map_or(true, |c| !(c.is_alphanumeric() || c == '_'));
+        let depois_ok = s[fim..].chars().next().map_or(true, |c| !(c.is_alphanumeric() || c == '_'));
+        if antes_ok && depois_ok {
+            return true;
+        }
+        desde = fim;
+    }
+    false
 }

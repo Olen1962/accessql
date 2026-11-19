@@ -73,6 +73,7 @@ impl AccessApp {
                         }
                     }
                 }
+                self.limpar_historico();
                 self.refresh_nav();
                 for (g, grp) in self.nav.iter().enumerate() {
                     if let Some(i) = grp.items.iter().position(|n| n == para) {

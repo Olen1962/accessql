@@ -3,7 +3,6 @@
 use crate::{
     db::{Condicao, Op},
     estado::*,
-    tema::*,
 };
 use eframe::egui::{self, Pos2, RichText};
 
@@ -109,14 +108,6 @@ impl AccessApp {
             None => return,
         };
         self.filtrar(col, op, valor);
-    }
-
-    pub(crate) fn remover_filtros_coluna(&mut self, col: usize) {
-        let Some(doc) = self.doc_de_dados() else { return };
-        let Some(c) = doc.data.cols.get(col) else { return };
-        let nome = c.0.clone();
-        doc.filtros.retain(|f| f.col != nome);
-        self.carregar_doc(self.active);
     }
 
     pub(crate) fn remover_todos_filtros(&mut self) {

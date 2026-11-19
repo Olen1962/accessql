@@ -1,4 +1,4 @@
-use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, Vec2};
 use crate::{icones::*, tema::*};
 // ───────────────────────────── Widgets do ribbon ─────────────────────────────
 pub(crate) fn tw(ui: &Ui, text: &str, size: f32) -> f32 {
@@ -66,22 +66,6 @@ pub(crate) fn group(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
     let x = r.right() + 3.0;
     ui.painter().line_segment([Pos2::new(x, r.top() + 2.0), Pos2::new(x, r.bottom())], Stroke::new(1.0_f32, GROUP_SEP));
     ui.add_space(6.0);
-}
-pub(crate) fn faux_combo(ui: &mut Ui, text: &str, w: f32) {
-    Frame::none()
-        .fill(Color32::WHITE)
-        .stroke(Stroke::new(1.0_f32, rgb(0xABC0DE)))
-        .inner_margin(Margin::symmetric(4.0, 1.0))
-        .show(ui, |ui| {
-            ui.set_width(w);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(text).size(12.0).color(TEXT));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-                    down_arrow(ui.painter(), r.center(), TEXT);
-                });
-            });
-        });
 }
 #[derive(Clone, Copy)]
 pub(crate) enum TabStyle {

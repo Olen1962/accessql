@@ -1,5 +1,5 @@
-use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
-use crate::{dados_exemplo::*, db::Op, estado::*, icones::*, tema::*, widgets::*};
+use eframe::egui::{self, Align2, FontId, Frame, Margin, Pos2, Sense, Stroke, Ui, Vec2};
+use crate::{db::Op, estado::*, icones::*, tema::*, widgets::*};
 impl AccessApp {
 // ───────────── Barra de título / Acesso Rápido ─────────────
     pub(crate) fn qat(&mut self, ctx: &egui::Context) {
@@ -21,10 +21,17 @@ impl AccessApp {
                     let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
                     draw_icon(ui.painter(), r, Icon::Badge("A", ACCENT));
                     ui.add_space(6.0);
-                    for (ic, tip) in [(Icon::Save, "Guardar"), (Icon::Undo, "Anular"), (Icon::Redo, "Refazer")] {
+                    for (ic, tip) in [
+                        (Icon::Undo, "Desfazer (Ctrl+Z)"),
+                        (Icon::Redo, "Refazer (Ctrl+Y)"),
+                    ] {
                         let r = small_btn(ui, ic, "", false).on_hover_text(tip);
                         if r.clicked() {
-                            self.msg = format!("«{}» – apenas apresentação visual", tip);
+                            match ic {
+                                Icon::Undo => self.desfazer(),
+                                Icon::Redo => self.refazer(),
+                                _ => {}
+                            }
                         }
                     }
                 });
@@ -44,7 +51,6 @@ impl AccessApp {
                     ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
                     if ribbon_tab(ui, "Ficheiro", self.backstage, TabStyle::File).clicked() {
                         self.backstage = !self.backstage;
-                        self.dropdown = None;
                     }
                     let names = ["Base", "Criar", "Dados Externos", "Ferramentas de Bases de Dados", "Folha de Dados"];
                     for (i, n) in names.iter().enumerate() {
@@ -59,16 +65,8 @@ impl AccessApp {
                         if r.clicked() {
                             self.tab = i;
                             self.backstage = false;
-                            self.dropdown = None;
-                        }
+                            }
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let (r, resp) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
-                        let p = ui.painter();
-                        p.circle_filled(r.center(), 8.0, if resp.hovered() { rgb(0x5B8BC9) } else { C_BLUE });
-                        p.text(r.center(), Align2::CENTER_CENTER, "?", FontId::proportional(12.0), Color32::WHITE);
-                        resp.on_hover_text("Ajuda do AccesSQL (F1)");
-                    });
                 });
             });
     }
@@ -96,12 +94,16 @@ impl AccessApp {
     pub(crate) fn ribbon_base(&mut self, ui: &mut Ui) {
         self.grupo_vistas(ui);
         group(ui, "Área de Transferência", |ui| {
-            self.rb(ui, Icon::Paste, "Colar", Some("colar"));
-            self.stack(ui, &[
-                (Icon::Badge("X", C_GRAY), "Cortar", None),
-                (Icon::Badge("C", C_BLUE), "Copiar", None),
-                (Icon::Badge("F", C_ORANGE), "Pincel de Formatos", None),
-            ]);
+            // «Colar» só existe pelo teclado (Ctrl+V): o egui não deixa ler a área de transferência
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                if small_btn(ui, Icon::Badge("X", C_GRAY), "Cortar (Ctrl+X)", false).clicked() {
+                    self.clip_acao = Some(1);
+                }
+                if small_btn(ui, Icon::Badge("C", C_BLUE), "Copiar (Ctrl+C)", false).clicked() {
+                    self.clip_acao = Some(0);
+                }
+            });
         });
         group(ui, "Ordenar e Filtrar", |ui| {
             if big_btn(ui, Icon::Filter, "Filtro", false).clicked() {
@@ -142,39 +144,18 @@ impl AccessApp {
                 if small_btn(ui, Icon::Badge("+", C_GREEN), "Novo", false).clicked() {
                     self.novo_registo();
                 }
-                if small_btn(ui, Icon::Save, "Guardar", false).clicked() {
-                    self.msg = "Os registos são gravados automaticamente".into();
-                }
                 if small_btn(ui, Icon::Badge("x", C_RED), "Eliminar", false).clicked() {
                     self.pedir_eliminar();
                 }
             });
-            self.stack(ui, &[
-                (Icon::Badge("S", C_PURPLE), "Totais", None),
-                (Icon::Badge("O", C_BLUE), "Ortografia", None),
-                (Icon::Badge("…", C_GRAY), "Mais", Some("mais_reg")),
-            ]);
+            if big_btn(ui, Icon::Badge("Σ", C_PURPLE), "Totais", false).clicked() {
+                self.totais_aberto = true;
+            }
         });
         group(ui, "Localizar", |ui| {
             if big_btn(ui, Icon::Badge("L", C_BLUE), "Localizar", false).clicked() {
                 self.focar_busca = true;
             }
-        });
-        group(ui, "Formatação de Texto", |ui| {
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(2.0, 4.0);
-                ui.horizontal(|ui| {
-                    faux_combo(ui, "Calibri", 110.0);
-                    faux_combo(ui, "11", 34.0);
-                });
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::ZERO;
-                    for (t, c) in [("N", C_GRAY), ("I", C_GRAY), ("S", C_GRAY), ("A", C_RED), ("◧", C_ORANGE)] {
-                        let r = small_btn(ui, Icon::Badge(t, c), "", false);
-                        self.act(&r, "Formatação", None);
-                    }
-                });
-            });
         });
     }
     pub(crate) fn ribbon_criar(&mut self, ui: &mut Ui) {
@@ -209,61 +190,29 @@ impl AccessApp {
             if big_btn(ui, Icon::Badge("C", C_GREEN), "Compactar e\nReparar", false).clicked() {
                 self.compactar_bd();
             }
-            self.rb(ui, Icon::Badge("M", C_ORANGE), "Executar\nMacro", None);
-        });
-        group(ui, "Relações", |ui| {
-            self.rb(ui, Icon::Badge("R", C_BLUE), "Relações", None);
-            self.stack(ui, &[(Icon::Badge("D", C_GRAY), "Dependências de Objetos", None)]);
-        });
-        group(ui, "Analisar", |ui| {
-            self.rb(ui, Icon::Report, "Documentador de\nBases de Dados", None);
-            self.stack(ui, &[
-                (Icon::Badge("A", C_PURPLE), "Analisar Desempenho", None),
-                (Icon::Table, "Analisar Tabela", None),
-            ]);
-        });
-        group(ui, "Mover Dados", |ui| {
-            self.rb(ui, Icon::Badge("S", C_BLUE), "Base de Dados\nSQLite", None);
-            self.rb(ui, Icon::Table, "Base de Dados\nAccess", None);
+            if big_btn(ui, Icon::Badge("I", C_BLUE), "Índices", false).clicked() {
+                self.abrir_indices();
+            }
+            if big_btn(ui, Icon::Badge("R", C_ORANGE), "Relações", false).clicked() {
+                self.abrir_relacoes();
+            }
         });
     }
     pub(crate) fn ribbon_folha(&mut self, ui: &mut Ui) {
         self.grupo_vistas(ui);
         group(ui, "Campos e Colunas", |ui| {
-            self.rb(ui, Icon::Badge("+", C_GREEN), "Novo\nCampo", None);
-            self.rb(ui, Icon::Table, "Adicionar Campos\nExistentes", None);
-            self.stack(ui, &[
-                (Icon::Badge("I", C_BLUE), "Inserir", None),
-                (Icon::Badge("P", C_ORANGE), "Modificar Pesquisas", None),
-                (Icon::Badge("x", C_RED), "Eliminar", None),
-            ]);
-        });
-        group(ui, "Tipo de Dados e Formatação", |ui| {
+            if big_btn(ui, Icon::Badge("+", C_GREEN), "Novo\nCampo", false).clicked() {
+                self.campo_na_estrutura(0);
+            }
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Tipo de Dados:").size(12.0).color(TEXT));
-                    faux_combo(ui, "Texto Curto", 100.0);
-                });
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Formato:").size(12.0).color(TEXT));
-                    faux_combo(ui, "", 120.0);
-                });
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::ZERO;
-                    for t in ["€", "%", ",", ".0", ".00"] {
-                        let r = small_btn(ui, Icon::Badge(t, C_GRAY), "", false);
-                        self.act(&r, "Formato", None);
-                    }
-                });
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                if small_btn(ui, Icon::Badge("R", C_BLUE), "Renomear Campo", false).clicked() {
+                    self.campo_na_estrutura(1);
+                }
+                if small_btn(ui, Icon::Badge("x", C_RED), "Eliminar Campo", false).clicked() {
+                    self.campo_na_estrutura(2);
+                }
             });
-        });
-        group(ui, "Validação de Campos", |ui| {
-            self.stack(ui, &[
-                (Icon::Badge("!", C_RED), "Obrigatório", None),
-                (Icon::Badge("1", C_BLUE), "Único", None),
-                (Icon::Badge("i", C_GREEN), "Indexado", None),
-            ]);
         });
     }
 }

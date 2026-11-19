@@ -1,5 +1,6 @@
-use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
-use crate::{db::{Condicao, Op, TableData}, estado::*, icones::*, tema::*, widgets::*};
+use eframe::egui::{self, Align2, Color32, FontId, Frame, Margin, Pos2, Rect, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use rusqlite::types::Value;
+use crate::{desfazer::Acao, db::{Campo, Condicao, Op, TableData}, estado::*, icones::*, tema::*, widgets::*};
 #[derive(Default)]
 struct Teclas {
     dx: i32,
@@ -17,6 +18,8 @@ struct Teclas {
     colar: Option<String>,
     /// Ctrl+' : copiar o valor da célula de cima.
     acima: bool,
+    desfazer: bool,
+    refazer: bool,
     typed: String,
 }
 
@@ -121,10 +124,12 @@ impl AccessApp {
             self.row_sel = false;
         }
         let mut commit: Option<(usize, usize, String, bool)> = None;
+        // texto a colar (linha, coluna, texto, registo selecionado): aplicado depois de desenhar
+        let mut paste: Option<(usize, usize, String, bool)> = None;
         // ações que precisam dos dados do documento: executadas só depois de os devolver
         let mut menu_act: Option<u8> = None;
         if self.edit.is_none() && ncols > 0 && !digitando && self.confirm_del.is_none() && !self.foco_nav {
-            let t = ui.input(|i| {
+            let mut t = ui.input(|i| {
                 let mut t = Teclas::default();
                 t.ctrl = i.modifiers.command;
                 if i.key_pressed(egui::Key::ArrowRight) {
@@ -147,6 +152,8 @@ impl AccessApp {
                 t.delete = i.key_pressed(egui::Key::Delete);
                 t.backspace = i.key_pressed(egui::Key::Backspace);
                 t.acima = i.modifiers.command && (i.key_pressed(egui::Key::Quote) || i.key_pressed(egui::Key::Minus));
+                t.desfazer = i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z);
+                t.refazer = i.modifiers.command && (i.key_pressed(egui::Key::Y) || (i.modifiers.shift && i.key_pressed(egui::Key::Z)));
                 for e in &i.events {
                     match e {
                         egui::Event::Copy => t.copiar = true,
@@ -166,6 +173,14 @@ impl AccessApp {
                 }
                 t
             });
+            // pedidos dos botões Cortar/Copiar do ribbon
+            if let Some(a) = self.clip_acao.take() {
+                if a == 0 {
+                    t.copiar = true;
+                } else {
+                    t.cortar = true;
+                }
+            }
             let navega = t.dx != 0 || t.dy != 0 || t.home || t.end || t.pgup || t.pgdn;
             if navega {
                 let pagina = (((h - hh) / rh).floor().max(1.0)) as i32;
@@ -225,15 +240,9 @@ impl AccessApp {
                     }
                 }
             } else if let Some(txt) = &t.colar {
-                // Ctrl+V: cola na célula selecionada (só o primeiro valor, se vierem vários)
-                if editable && !self.row_sel {
-                    let (r, c) = self.sel;
-                    let primeira = txt.lines().next().unwrap_or("");
-                    let valor = primeira.split('\t').next().unwrap_or("").to_string();
-                    if txt.trim_end_matches(['\r', '\n']).contains(['\t', '\n']) {
-                        self.msg = "Colado só o primeiro valor do texto copiado".into();
-                    }
-                    commit = Some((r, c, valor, false));
+                // Ctrl+V: cola uma célula, vários campos ou vários registos
+                if editable {
+                    paste = Some((self.sel.0, self.sel.1, txt.clone(), self.row_sel));
                 }
             } else if t.acima {
                 // Ctrl+': copia o valor da mesma coluna no registo de cima
@@ -245,6 +254,10 @@ impl AccessApp {
                 } else if let Some(v) = data.rows.get(r - 1).and_then(|row| row.get(c)).cloned() {
                     commit = Some((r, c, v, false));
                 }
+            } else if t.desfazer {
+                menu_act = Some(5);
+            } else if t.refazer {
+                menu_act = Some(6);
             } else if t.delete {
                 if self.row_sel {
                     menu_act = Some(2);
@@ -268,6 +281,7 @@ impl AccessApp {
             }
         }
 
+        self.clip_acao = None;
         let sel = self.sel;
         let row_sel = self.row_sel;
         let mut hit: Option<(usize, usize, bool)> = None;
@@ -423,8 +437,7 @@ impl AccessApp {
                     p.line_segment([Pos2::new(x, ty), Pos2::new(x, ty + hh)], line);
                 }
                 if editable {
-                    p.text(Pos2::new(x + 6.0, ty + hh / 2.0), Align2::LEFT_CENTER, "Clique para Adicionar", FontId::proportional(13.0), rgb(0x5A7FB5));
-                    down_arrow(&p, Pos2::new(x + extra - 11.0, ty + hh / 2.0), rgb(0x5A7FB5));
+                    p.text(Pos2::new(x + 6.0, ty + hh / 2.0), Align2::LEFT_CENTER, "Nova coluna", FontId::proportional(13.0), rgb(0x5A7FB5));
                 }
                 p.line_segment([Pos2::new(o.x + sw, ty), Pos2::new(o.x + sw, ty + hh)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
                 p.line_segment([Pos2::new(o.x, ty + hh), Pos2::new(o.x + data_w, ty + hh)], Stroke::new(1.0_f32, rgb(0xB4B4B4)));
@@ -515,11 +528,16 @@ impl AccessApp {
         }
         if let Some((r, c, t, adv)) = commit {
             self.gravar_celula(&mut data, &tabela, r, c, t);
+            self.fechar_passo();
             let n = data.rows.len();
             if adv {
                 self.sel = if c + 1 < ncols { (r, c + 1) } else { ((r + 1).min(n), 0) };
                 self.scroll_sel = true;
             }
+        }
+        if let Some((r, c, txt, por_registo)) = paste {
+            self.colar_texto(&mut data, &tabela, r, c, &txt, por_registo);
+            self.fechar_passo();
         }
         let total = data.rows.len();
         self.docs[self.active].data = data;
@@ -536,9 +554,178 @@ impl AccessApp {
             Some(2) => self.pedir_eliminar(),
             Some(3) => self.filtrar_selecao(Op::Igual),
             Some(4) => self.filtrar_selecao(Op::Diferente),
+            Some(5) => self.desfazer(),
+            Some(6) => self.refazer(),
             _ => {}
         }
         self.record_bar(ui, total, novo == 1);
+    }
+
+    /// Volta a ler a tabela do separador ativo para `data`, com a ordenação e os filtros dele.
+    fn recarregar_local(&mut self, data: &mut TableData, tabela: &str) -> bool {
+        let (ordem_f, filtros_f): (Option<(String, bool)>, Vec<Condicao>) = {
+            let d = &self.docs[self.active];
+            (d.ordem.clone(), if d.filtro_ativo { d.filtros.clone() } else { Vec::new() })
+        };
+        let r = self
+            .db
+            .as_ref()
+            .map(|db| db.load_filtrado(tabela, true, ordem_f.as_ref().map(|(c, a)| (c.as_str(), *a)), &filtros_f));
+        match r {
+            Some(Ok(d)) => {
+                *data = d;
+                true
+            }
+            Some(Err(e)) => {
+                self.msg = format!("Erro ao atualizar a tabela: {}", e);
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Ctrl+V: cola texto copiado (uma célula, vários campos separados por tabuladores
+    /// ou vários registos, um por linha). Na linha `(Novo)` cada linha cria um registo
+    /// novo; nas outras, os valores substituem as células a partir da selecionada.
+    /// Ao colar um registo inteiro, o campo de numeração automática não é escrito.
+    fn colar_texto(&mut self, data: &mut TableData, tabela: &str, r: usize, c: usize, txt: &str, por_registo: bool) {
+        let linhas: Vec<Vec<String>> = txt
+            .lines()
+            .map(|l| l.split('\t').map(str::to_string).collect())
+            .collect();
+        let ncols = data.cols.len();
+        let nrows = data.rows.len();
+        if linhas.is_empty() || ncols == 0 {
+            return;
+        }
+        // campo INTEGER PRIMARY KEY (numeração automática), se existir
+        let auto: Option<usize> = self
+            .db
+            .as_ref()
+            .and_then(|db| db.info_tabela(tabela).ok())
+            .and_then(|(campos, _)| {
+                let pks: Vec<&Campo> = campos.iter().filter(|f| f.pk).collect();
+                if pks.len() == 1 && pks[0].tipo.eq_ignore_ascii_case("INTEGER") {
+                    data.cols.iter().position(|x| x.0 == pks[0].nome)
+                } else {
+                    None
+                }
+            });
+        let completo = linhas[0].len() >= ncols;
+        if r >= nrows {
+            // linha (Novo): acrescentar registos
+            let c0 = if completo { 0 } else { c };
+            let saltar = completo && c0 == 0;
+            let largura = linhas.iter().map(|l| l.len()).max().unwrap_or(0);
+            let mut mapa: Vec<(usize, String, bool)> = Vec::new();
+            for j in 0..largura {
+                let col = c0 + j;
+                if col >= ncols {
+                    break;
+                }
+                if saltar && Some(col) == auto {
+                    continue;
+                }
+                mapa.push((j, data.cols[col].0.clone(), false));
+            }
+            // valida tudo antes de inserir: uma colagem inválida não grava nada
+            if let Some(db) = self.db.as_ref() {
+                if let Ok((campos, _)) = db.info_tabela(tabela) {
+                    for &(j, ref nome, _) in &mapa {
+                        let Some(campo) = campos.iter().find(|f| f.nome.eq_ignore_ascii_case(nome)) else { continue };
+                        for l in &linhas {
+                            let v = l.get(j).map(String::as_str).unwrap_or("");
+                            if let Err(m) = crate::validacao::validar(&campo.tipo, campo.obrigatorio, v, nome) {
+                                self.msg = m;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            let resultado = match self.db.as_ref() {
+                Some(db) => db.inserir_linhas_ids(tabela, &mapa, &linhas, false).map(|ids| {
+                    let acoes: Vec<Acao> = ids
+                        .iter()
+                        .filter_map(|rid| {
+                            db.registo_bruto(tabela, *rid)
+                                .ok()
+                                .map(|(colunas, valores)| Acao::Inserido { tabela: tabela.to_string(), rowid: *rid, colunas, valores })
+                        })
+                        .collect();
+                    (ids.len(), acoes)
+                }),
+                None => return,
+            };
+            match resultado {
+                Ok((n, acoes)) => {
+                    self.hist_pend.extend(acoes);
+                    if self.recarregar_local(data, tabela) {
+                        self.sel = (nrows.min(data.rows.len().saturating_sub(1)), c0.min(ncols - 1));
+                        self.scroll_sel = true;
+                    }
+                    self.msg = format!("Colado(s) {} registo(s)", n);
+                }
+                Err(e) => self.msg = format!("Não foi possível colar: {}", e),
+            }
+        } else {
+            // registo existente: substitui as células a partir da selecionada
+            let c = if por_registo { 0 } else { c };
+            let saltar = completo && c == 0;
+            // valida toda a colagem antes de gravar, para não ficar parcial
+            for (i, l) in linhas.iter().enumerate() {
+                let ri = r + i;
+                if ri >= nrows {
+                    continue;
+                }
+                for (j, v) in l.iter().enumerate() {
+                    let ci = c + j;
+                    if ci >= ncols {
+                        break;
+                    }
+                    if saltar && Some(ci) == auto {
+                        continue;
+                    }
+                    let tipo = data.tipos.get(ci).map(String::as_str).unwrap_or("");
+                    let obrig = data.obrig.get(ci).copied().unwrap_or(false);
+                    if let Err(m) = crate::validacao::validar(tipo, obrig, v, &data.cols[ci].0) {
+                        self.msg = m;
+                        return;
+                    }
+                }
+            }
+            let antes = self.msg.clone();
+            let (mut n, mut fora_linhas, mut fora_cols) = (0usize, 0usize, false);
+            for (i, l) in linhas.iter().enumerate() {
+                let ri = r + i;
+                if ri >= nrows {
+                    fora_linhas += 1;
+                    continue;
+                }
+                for (j, v) in l.iter().enumerate() {
+                    let ci = c + j;
+                    if ci >= ncols {
+                        fora_cols = true;
+                        break;
+                    }
+                    if saltar && Some(ci) == auto {
+                        continue;
+                    }
+                    self.gravar_celula(data, tabela, ri, ci, v.clone());
+                    n += 1;
+                }
+            }
+            if self.msg == antes {
+                let mut m = format!("Colada(s) {} célula(s)", n);
+                if fora_linhas > 0 {
+                    m.push_str(&format!("; {} linha(s) para além do fim da tabela foram ignoradas (use a linha (Novo) para acrescentar registos)", fora_linhas));
+                }
+                if fora_cols {
+                    m.push_str("; algumas colunas ficaram de fora");
+                }
+                self.msg = m;
+            }
+        }
     }
 
     /// Grava uma célula (UPDATE) ou cria um registo novo (INSERT) na linha `(Novo)`.
@@ -549,16 +736,34 @@ impl AccessApp {
             (d.ordem.clone(), if d.filtro_ativo { d.filtros.clone() } else { Vec::new() })
         };
         let col = data.cols[c].0.clone();
+        let tipo = data.tipos.get(c).map(String::as_str).unwrap_or("");
+        let obrig = data.obrig.get(c).copied().unwrap_or(false);
+        if let Err(m) = crate::validacao::validar(tipo, obrig, &texto, &col) {
+            self.msg = m;
+            return;
+        }
         if r < data.rows.len() {
             if data.rows[r][c] == texto {
                 return;
             }
             let rid = data.rowids[r];
+            let antigo = db.valor_bruto(tabela, &col, rid).unwrap_or(Value::Null);
             if let Err(e) = db.update_cell(tabela, &col, rid, &texto) {
-                self.msg = format!("Não foi possível gravar: {}", e);
+                self.msg = format!("Não foi possível gravar: {}", crate::db::traduz(e));
                 return;
             }
-            match db.fetch_row(tabela, rid) {
+            let linha = db.fetch_row(tabela, rid);
+            // se mudou o campo de chave, o registo passa a ter outro rowid
+            let rowid_depois = if matches!(linha, Ok(None)) { texto.trim().parse::<i64>().unwrap_or(rid) } else { rid };
+            self.hist_pend.push(Acao::Celula {
+                tabela: tabela.to_string(),
+                rowid: rid,
+                rowid_depois,
+                col: col.clone(),
+                antigo,
+                novo: crate::db::valor(&texto),
+            });
+            match linha {
                 Ok(Some(row)) => data.rows[r] = row,
                 _ => {
                     // a chave mudou (por exemplo, o campo ID): voltar a ler a tabela
@@ -572,18 +777,23 @@ impl AccessApp {
                 return;
             }
             match db.insert_cell(tabela, &col, &texto) {
-                Ok(rid) => match db.fetch_row(tabela, rid) {
-                    Ok(Some(row)) => {
-                        data.rows.push(row);
-                        data.rowids.push(rid);
+                Ok(rid) => {
+                    if let Ok((colunas, valores)) = db.registo_bruto(tabela, rid) {
+                        self.hist_pend.push(Acao::Inserido { tabela: tabela.to_string(), rowid: rid, colunas, valores });
                     }
-                    _ => {
-                        if let Ok(d) = db.load_filtrado(tabela, true, ordem_f.as_ref().map(|(c, a)| (c.as_str(), *a)), &filtros_f) {
-                            *data = d;
+                    match db.fetch_row(tabela, rid) {
+                        Ok(Some(row)) => {
+                            data.rows.push(row);
+                            data.rowids.push(rid);
+                        }
+                        _ => {
+                            if let Ok(d) = db.load_filtrado(tabela, true, ordem_f.as_ref().map(|(c, a)| (c.as_str(), *a)), &filtros_f) {
+                                *data = d;
+                            }
                         }
                     }
-                },
-                Err(e) => self.msg = format!("Não foi possível criar o registo: {}", e),
+                }
+                Err(e) => self.msg = format!("Não foi possível criar o registo: {}", crate::db::traduz(e)),
             }
         }
     }
@@ -648,15 +858,20 @@ impl AccessApp {
         }
         let nome = doc.name.clone();
         let rid = doc.data.rowids[row];
+        let anterior = self.db.as_ref().and_then(|d| d.registo_bruto(&nome, rid).ok());
         match self.db.as_ref().map(|d| d.delete_row(&nome, rid)) {
             Some(Ok(())) => {
+                if let Some((colunas, valores)) = anterior {
+                    self.hist_pend.push(Acao::Apagado { tabela: nome.clone(), rowid: rid, colunas, valores });
+                    self.fechar_passo();
+                }
                 let d = &mut self.docs[self.active].data;
                 d.rows.remove(row);
                 d.rowids.remove(row);
                 self.sel.0 = row.min(d.rows.len());
                 self.msg = "Registo eliminado".into();
             }
-            Some(Err(e)) => self.msg = format!("Não foi possível eliminar: {}", e),
+            Some(Err(e)) => self.msg = format!("Não foi possível eliminar: {}", crate::db::traduz(e)),
             None => {}
         }
     }

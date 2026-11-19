@@ -9,6 +9,12 @@ mod estrutura;
 mod renomear;
 mod filtros;
 mod csvio;
+mod desfazer;
+mod totais;
+mod indices;
+mod relacoes;
+mod eliminar_obj;
+mod validacao;
 mod recentes;
 mod estado;
 mod ribbon;
@@ -16,7 +22,6 @@ mod navegacao;
 mod area_trabalho;
 mod status;
 mod backstage;
-mod menus;
 mod app;
 
 fn main() -> eframe::Result<()> {

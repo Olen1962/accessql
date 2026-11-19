@@ -23,6 +23,10 @@ pub(crate) struct Estrutura {
     pub(crate) renomear: Option<(usize, String)>,
     /// Pedir o foco para a caixa de texto do nome, no próximo desenho.
     pub(crate) foco_ren: bool,
+    /// Pedir o foco para a caixa «nome» do campo a acrescentar.
+    pub(crate) foco_novo: bool,
+    /// Campos a que se pode ligar uma chave estrangeira: (tabela, campo).
+    pub(crate) fk_opcoes: Vec<(String, String)>,
     pub(crate) eliminar: Option<usize>,
     /// Campo a acrescentar a uma tabela existente.
     pub(crate) novo: Campo,
@@ -34,8 +38,26 @@ fn campo_texto() -> Campo {
     Campo { tipo: "TEXT".into(), ..Default::default() }
 }
 
+/// Lista «Refere a»: escolhe a tabela e o campo de uma chave estrangeira.
+fn combo_fk(ui: &mut Ui, id: impl std::hash::Hash, tabela: &mut String, coluna: &mut String, opcoes: &[(String, String)]) {
+    let texto = if tabela.is_empty() { "(nenhuma)".to_string() } else { format!("{}({})", tabela, coluna) };
+    egui::ComboBox::from_id_salt(id).width(150.0).selected_text(texto).show_ui(ui, |ui| {
+        if ui.selectable_label(tabela.is_empty(), "(nenhuma)").clicked() {
+            tabela.clear();
+            coluna.clear();
+        }
+        for (t, c) in opcoes {
+            let atual = tabela == t && coluna == c;
+            if ui.selectable_label(atual, format!("{}({})", t, c)).clicked() {
+                *tabela = t.clone();
+                *coluna = c.clone();
+            }
+        }
+    });
+}
+
 fn combo_tipo(ui: &mut Ui, id: impl std::hash::Hash, valor: &mut String) {
-    egui::ComboBox::from_id_source(id)
+    egui::ComboBox::from_id_salt(id)
         .width(100.0)
         .selected_text(valor.clone())
         .show_ui(ui, |ui| {
@@ -78,7 +100,8 @@ impl AccessApp {
         };
         match r {
             Ok((campos, sql)) => {
-                let est = Estrutura { campos, sql, novo: campo_texto(), ..Default::default() };
+                let fk_opcoes = self.db.as_ref().and_then(|db| db.opcoes_fk().ok()).unwrap_or_default();
+                let est = Estrutura { campos, sql, novo: campo_texto(), fk_opcoes, ..Default::default() };
                 let doc = Doc {
                     kind: ObjKind::Design,
                     name: nome.to_string(),
@@ -124,6 +147,7 @@ impl AccessApp {
             nome_tabela: nome.clone(),
             campos: vec![id, Campo { nome: "nome".into(), ..campo_texto() }],
             novo: campo_texto(),
+            fk_opcoes: self.db.as_ref().and_then(|db| db.opcoes_fk().ok()).unwrap_or_default(),
             ..Default::default()
         };
         self.docs.push(Doc {
@@ -160,6 +184,36 @@ impl AccessApp {
             Some((ObjKind::Sql, n, _, true)) => self.open_doc(ObjKind::Query, n),
             Some((ObjKind::Sql, _, _, false)) => self.msg = "Guarde a consulta para a poder ver como folha de dados".into(),
             None => self.msg = "Não há nenhum separador aberto".into(),
+        }
+    }
+
+    /// Botões «Novo Campo» (0), «Renomear Campo» (1) e «Eliminar Campo» (2) da folha de dados:
+    /// abrem a Vista Estrutura da tabela, já posicionada no campo da coluna selecionada.
+    pub(crate) fn campo_na_estrutura(&mut self, acao: u8) {
+        let Some((nome, kind)) = self.docs.get(self.active).map(|d| (d.name.clone(), d.kind)) else {
+            self.msg = "Abra uma tabela primeiro".into();
+            return;
+        };
+        if kind != ObjKind::Table {
+            self.msg = "Só as tabelas têm campos que se possam alterar".into();
+            return;
+        }
+        let col = self.sel.1;
+        self.abrir_estrutura(&nome);
+        if let Some(est) = self.docs.get_mut(self.active).and_then(|d| d.estr.as_mut()) {
+            if col < est.campos.len() {
+                est.sel = Some(col);
+            }
+            match acao {
+                0 => est.foco_novo = true,
+                1 => {
+                    if let Some(i) = est.sel {
+                        est.renomear = Some((i, est.campos[i].nome.clone()));
+                        est.foco_ren = true;
+                    }
+                }
+                _ => est.eliminar = est.sel,
+            }
         }
     }
 
@@ -218,7 +272,7 @@ impl AccessApp {
             est.renomear = None;
         }
         let mut ac: Option<Ac> = None;
-        egui::ScrollArea::vertical().id_source("estr_scroll").auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("estr_scroll").auto_shrink([false, false]).show(ui, |ui| {
             ui.add_space(6.0);
             if est.nova {
                 ui.horizontal(|ui| {
@@ -254,7 +308,7 @@ impl AccessApp {
             ui.horizontal(|ui| {
                 ui.add_space(8.0);
                 egui::Grid::new("estr_grid").striped(true).spacing([12.0, 6.0]).show(ui, |ui| {
-                    for h in ["", "Nome do Campo", "Tipo de Dados", "Obrigatório", "Valor por Omissão", "Chave Primária", ""] {
+                    for h in ["", "Nome do Campo", "Tipo de Dados", "Obrigatório", "Valor por Omissão", "Chave Primária", "Refere a", ""] {
                         ui.label(RichText::new(h).strong());
                     }
                     ui.end_row();
@@ -275,6 +329,7 @@ impl AccessApp {
                             ui.checkbox(&mut c.obrigatorio, "");
                             ui.add(egui::TextEdit::singleline(&mut c.omissao).desired_width(130.0));
                             ui.checkbox(&mut c.pk, "");
+                            combo_fk(ui, ("fk", i), &mut c.ref_tabela, &mut c.ref_coluna, &est.fk_opcoes);
                             if ui.small_button("✕").on_hover_text("Remover campo").clicked() {
                                 ac = Some(Ac::RemLinha(i));
                             }
@@ -315,6 +370,7 @@ impl AccessApp {
                             ui.label(if c.obrigatorio { "Sim" } else { "Não" });
                             ui.label(&c.omissao);
                             ui.label(if c.pk { "Sim" } else { "" });
+                            ui.label(if c.ref_tabela.is_empty() { String::new() } else { format!("{}({})", c.ref_tabela, c.ref_coluna) });
                             ui.horizontal(|ui| {
                                 if ui.small_button("Renomear").clicked() {
                                     est.sel = Some(i);
@@ -351,8 +407,18 @@ impl AccessApp {
                 ui.horizontal(|ui| {
                     ui.add_space(8.0);
                     ui.label(RichText::new("Acrescentar campo:").strong());
-                    ui.add(egui::TextEdit::singleline(&mut est.novo.nome).hint_text("nome").desired_width(150.0));
+                    let rn = ui.add(
+                        egui::TextEdit::singleline(&mut est.novo.nome)
+                            .id(egui::Id::new("novo_campo_nome"))
+                            .hint_text("nome")
+                            .desired_width(150.0),
+                    );
+                    if est.foco_novo {
+                        rn.request_focus();
+                        est.foco_novo = false;
+                    }
                     combo_tipo(ui, "tipo_novo", &mut est.novo.tipo);
+                    combo_fk(ui, "fk_novo", &mut est.novo.ref_tabela, &mut est.novo.ref_coluna, &est.fk_opcoes);
                     ui.checkbox(&mut est.novo.obrigatorio, "Obrigatório");
                     ui.add(egui::TextEdit::singleline(&mut est.novo.omissao).hint_text("valor por omissão").desired_width(130.0));
                     if ui.button("Acrescentar").clicked() {
@@ -376,6 +442,7 @@ impl AccessApp {
             }
         });
 
+        let altera = matches!(ac, Some(Ac::Criar) | Some(Ac::Acrescentar) | Some(Ac::Renomear(..)) | Some(Ac::Eliminar(_)));
         match ac {
             Some(Ac::AddLinha) => est.campos.push(campo_texto()),
             Some(Ac::RemLinha(i)) => {
@@ -476,6 +543,9 @@ impl AccessApp {
                 }
             }
             None => {}
+        }
+        if altera {
+            self.limpar_historico();
         }
         self.docs[self.active].estr = Some(est);
     }

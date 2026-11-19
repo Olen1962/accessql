@@ -1,4 +1,3 @@
-use crate::tema::*;
 // ───────────────────────────── Dados de exemplo (em memória) ─────────────────────────────
 pub(crate) type Cols = Vec<(&'static str, f32)>;
 pub(crate) type Rows = Vec<Vec<&'static str>>;
@@ -40,25 +39,5 @@ pub(crate) fn dataset(name: &str) -> (Cols, Rows) {
                 vec!["8", "Hugo", "Martins", "Martins Informática", "Aveiro", "Portugal", "234 000 008"],
             ],
         ),
-    }
-}
-pub(crate) fn dd_items(key: &str) -> &'static [&'static str] {
-    match key {
-        "vista" => &["Vista Folha de Dados", "Vista de Esquema", "Vista Estrutura"],
-        "colar" => &["Colar", "Colar Especial...", "Colar Acrescentar"],
-        "sel" => &["Igual a \"valor\"", "Diferente de \"valor\"", "Contém \"valor\"", "Não Contém \"valor\""],
-        "avanc" => &["Filtrar por Formulário", "Aplicar Filtro/Ordenação", "Limpar Todos os Filtros", "Filtro Avançado/Ordenação..."],
-        "mais_reg" => &["Altura da Linha...", "Largura da Coluna...", "Ocultar Campos", "Mostrar Campos..."],
-        "goto" => &["Primeiro", "Último", "Seguinte", "Anterior", "Novo"],
-        "selecionar" => &["Selecionar", "Selecionar Tudo"],
-        "navegacao" => &["Separadores Horizontais", "Separadores Verticais, Esquerda", "Separadores Verticais, Direita"],
-        "mais_forms" => &["Vários Itens", "Folha de Dados", "Formulário Dividido", "Caixa de Diálogo Modal"],
-        "modelos" => &["Contactos", "Tarefas", "Eventos", "Problemas"],
-        "partes" => &["Comentários", "Contactos", "Utilizadores", "Início Rápido"],
-        "imp_mais" => &["Ficheiro XML", "Documento HTML", "Pasta do Outlook", "Ficheiro dBASE"],
-        "exp_mais" => &["Word", "Ficheiro HTML", "Ficheiro dBASE", "Pasta do Outlook"],
-        "tipo" => &["Texto Curto", "Texto Longo", "Número", "Data/Hora", "Moeda", "Numeração Automática", "Sim/Não"],
-        "navcat" => &["Tipo de Objeto", "Tabelas e Vistas Relacionadas", "Data de Criação", "Data de Modificação", "Filtrar por Grupo"],
-        _ => &["(apenas apresentação visual)"],
     }
 }

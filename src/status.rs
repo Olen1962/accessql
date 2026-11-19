@@ -1,4 +1,4 @@
-use eframe::egui::{self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Response, RichText, Rounding, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align, Frame, Layout, Margin, RichText, Stroke};
 use crate::{estado::*, icones::*, tema::*, widgets::*};
 impl AccessApp {
 // ───────────── Barra de estado ─────────────

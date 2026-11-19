@@ -25,6 +25,11 @@ impl AccessApp {
         self.pedir_nome = None;
         self.n_consulta = 0;
         self.n_tabela = 0;
+        self.limpar_historico();
+        self.totais_aberto = false;
+        self.indices = None;
+        self.relacoes = None;
+        self.eliminar_obj = None;
         self.renomear_obj = None;
         self.importar = None;
         self.exportar_csv = None;
@@ -116,13 +121,31 @@ impl AccessApp {
             self.msg = "Escolha um ficheiro diferente do atual".into();
             return;
         }
-        if path.exists() {
-            // a caixa de diálogo já pediu confirmação para substituir
-            let _ = std::fs::remove_file(&path);
-        }
-        match db.copy_to(&path) {
-            Ok(()) => self.msg = format!("Cópia guardada em {}", path.display()),
-            Err(e) => self.msg = e,
+        // Gravar primeiro num ficheiro temporário: se a cópia falhar, o ficheiro
+        // de destino original fica intacto (a caixa de diálogo já confirmou a substituição).
+        let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let nome_tmp = format!(
+            ".{}.{}-{}.tmp",
+            path.file_name().and_then(|n| n.to_str()).unwrap_or("copia"),
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let tmp = dir.join(nome_tmp);
+        match db.copy_to(&tmp) {
+            Ok(()) => match std::fs::rename(&tmp, &path) {
+                Ok(()) => self.msg = format!("Cópia guardada em {}", path.display()),
+                Err(e) => {
+                    let _ = std::fs::remove_file(&tmp);
+                    self.msg = format!("Não foi possível guardar a cópia: {}", e);
+                }
+            },
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                self.msg = e;
+            }
         }
     }
 
@@ -141,6 +164,11 @@ impl AccessApp {
         self.pedir_nome = None;
         self.n_consulta = 0;
         self.n_tabela = 0;
+        self.limpar_historico();
+        self.totais_aberto = false;
+        self.indices = None;
+        self.relacoes = None;
+        self.eliminar_obj = None;
         self.renomear_obj = None;
         self.importar = None;
         self.exportar_csv = None;

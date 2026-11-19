@@ -47,6 +47,11 @@
 | `area_trabalho.rs` | Separadores de documentos e folha de dados (edição, `(Novo)`, eliminar, atualizar, linhas visíveis) |
 | `backstage.rs` | Separador Ficheiro: Informações, Recente, Novo; ações Abrir, Guardar Cópia Como, Fechar, Sair |
 | `db.rs` | Camada SQLite (`Database`, `TableData`): open/create/demo, catálogo, load, update/insert/delete, `VACUUM INTO`, compactar |
+| `eliminar_obj.rs` | Eliminar tabelas e consultas: confirmação, proteção das tabelas referidas por relações, aviso das consultas afetadas |
+| `relacoes.rs` | Janela «Relações»: chaves estrangeiras existentes, interruptor da integridade referencial, verificação |
+| `totais.rs` | Janela «Totais»: resumo da coluna selecionada |
+| `indices.rs` | Janela «Índices»: ver, criar e eliminar índices de uma tabela |
+| `desfazer.rs` | Desfazer/Refazer: histórico de alterações a células, registos criados e eliminados |
 | `csvio.rs` | Dados Externos: importar CSV (separador e codificação detetados, tabela nova ou acrescentar) e exportar CSV |
 | `filtros.rs` | Ordenar, filtrar e procurar na folha de dados: ordenação e filtros por separador, menu da coluna, procura em memória |
 | `renomear.rs` | Mudar o nome de tabelas e consultas (F2 no painel de navegação): diálogo e atualização dos separadores abertos |
@@ -54,7 +59,7 @@
 | `consulta.rs` | Vista SQL: editor, executar (F5/Ctrl+Enter), resultados, guardar como `VIEW`, abrir `VIEW` para editar |
 | `ficheiro.rs` | Novo, abrir, guardar cópia, fechar, compactar (métodos de `AccessApp`) |
 | `recentes.rs` | Lista de recentes em `~/.config/accessql/recentes.txt` |
-| `menus.rs` | Menus pendentes |
+| `validacao.rs` | Validação dos valores ao gravar (tipos, obrigatório, datas, Sim/Não) e testes unitários |
 | `status.rs` | Barra de estado |
 | `tema.rs` | Paleta e constantes de cor |
 | `widgets.rs` | Botões grandes/pequenos, grupos do ribbon |
@@ -69,9 +74,13 @@
 - Objetos do painel de navegação: **Tabelas** e **Consultas**. As consultas guardadas são **`VIEW`s** do SQLite.
 - **Formulários e Relatórios ficam fora** da primeira versão (remover `Form`/`Report` de `ObjKind` e as vistas `form_view`/`report_view`).
 - Vistas: Folha de Dados, Estrutura, **SQL** (editor + resultados).
+- Eliminar tabelas e consultas: confirmação com o nome, o n.º de registos e aviso de que não se anula; **bloqueia-se só a tabela referida** por chaves estrangeiras de outras (a tabela que guarda a relação pode ser eliminada, e com ela a relação), mesmo com a integridade desligada; avisa das consultas que mencionam o objeto (não bloqueia). Delete no painel de navegação ou «Eliminar» no menu de contexto. Fecha os separadores do objeto e limpa o histórico de desfazer.
+- Integridade referencial: `PRAGMA foreign_keys = ON` ao abrir, criar ou ter a base de demonstração; a janela «Relações» tem um interruptor (vale só para a sessão). Chaves estrangeiras escolhem-se no campo «Refere a» (só chaves primárias simples) ao desenhar uma tabela nova ou ao acrescentar um campo; usam `REFERENCES tabela(campo)` na definição do campo. Não é possível acrescentar relações a campos que já existem (exigiria recriar a tabela). O erro `FOREIGN KEY constraint failed` é traduzido.
 - Cada objeto (tabela ou consulta) tem **um só separador**. O botão «Vista» e o menu de contexto trocam o modo no mesmo separador: tabela = dados <-> estrutura; consulta guardada = dados <-> SQL. Abrir (duplo clique) uma tabela já aberta só a ativa, ou volta ao modo de dados. Se uma consulta tem alterações de SQL por guardar, não se muda de vista (pede-se para guardar).
-- Folha de dados, células: Ctrl+C copia a célula (ou o registo inteiro, em texto separado por tabuladores, se estiver selecionado pelo seletor); Ctrl+X copia e limpa; Ctrl+V cola na célula (só o primeiro valor, se vierem vários) e também na linha `(Novo)`; Ctrl+' copia o valor da mesma coluna no registo de cima, com a célula selecionada ou durante a edição. Delete limpa a célula (NULL).
+- Desfazer/Refazer: cada gravação vai para `hist_pend`; `fechar_passo` junta tudo o que se fez numa operação (uma colagem grande desfaz-se de uma vez). Guardam-se os valores brutos do SQLite (inclui BLOB e NULL). O histórico (máx. 200 passos) limpa-se ao fechar/abrir a base de dados, executar SQL que altere dados, mudar a estrutura, mudar o nome de objetos e importar CSV. Não há «Colar» no ribbon: o egui só entrega o texto da área de transferência com Ctrl+V.
+- Folha de dados, células: Ctrl+C copia a célula (ou o registo inteiro, em texto separado por tabuladores, se estiver selecionado pelo seletor); Ctrl+X copia e limpa; Ctrl+V cola: na linha `(Novo)` cada linha de texto cria um registo novo (um registo inteiro copiado da grelha duplica-se com ID novo: o campo INTEGER PRIMARY KEY não é escrito); nos registos existentes os valores substituem as células a partir da selecionada (com o registo selecionado, a partir da 1.ª coluna), e linhas a mais que a tabela são ignoradas; Ctrl+' copia o valor da mesma coluna no registo de cima, com a célula selecionada ou durante a edição. Delete limpa a célula (NULL).
 - CSV: ao importar deteta-se o separador (`; , tab |`) e a codificação (UTF-8, senão Windows-1252). A tabela nova infere INTEGER/REAL/TEXT por coluna (zeros à esquerda = texto; vírgula decimal opcional). Acrescentar a uma tabela existente liga colunas pelo nome do cabeçalho (ou por posição, sem cabeçalho). A importação é uma só transação: se uma linha falhar, nada é gravado. Exportar grava o que está no separador (com a ordenação e os filtros), UTF-8 com BOM opcional, linhas CRLF.
+- Validação ao gravar: antes de `UPDATE`/`INSERT`, colagem ou importação CSV, o valor é verificado contra o tipo declarado e a obrigatoriedade da coluna (`PRAGMA table_info` → `TableData.tipos`/`obrig`). Inteiros, reais (com `.` ou `,`), Sim/Não e datas (`AAAA-MM-DD` ou `DD/MM/AAAA`, com validação de dias e anos bissextos) exigem formato válido; `TEXT`, `BLOB` e tipos personalizados aceitam texto livre. Um erro invalida toda a colagem/importação, que não grava nada. `UNIQUE`, `CHECK` e chaves estrangeiras continuam a ser validados pelo SQLite.
 - Ordenar e filtrar: por separador (`Doc.ordem`, `Doc.filtros`, `filtro_ativo`); a ordenação usa `ORDER BY col COLLATE NOCASE`; filtros acumulam com AND (igual, diferente, contém, não contém; vazio = NULL ou ''). Menu da coluna: clique na seta do cabeçalho, botão direito no cabeçalho, ou botão «Filtro» do ribbon. O cabeçalho mostra ▲/▼ na coluna ordenada e fica laranja nas filtradas. «Procurar» (barra de registos) é uma procura em memória nas linhas carregadas, com realce; Enter = seguinte.
 - F2: quem o recebe depende do último clique (`foco_nav`): no painel de navegação muda o nome da tabela/consulta selecionada; na folha de dados edita a célula; na Vista Estrutura muda o nome do campo selecionado (ou vai para a caixa do nome, numa tabela nova). Ignorado enquanto se escreve numa caixa de texto conhecida (`a_escrever`).
 - Vista Estrutura: tabela nova = grelha editável (nome, tipo, obrigatório, valor por omissão, chave primária) + «Criar Tabela» (uma chave primária INTEGER fica numerada automaticamente; várias chaves viram `PRIMARY KEY (a, b)`). Tabela existente = campos só de leitura com Renomear, Eliminar (confirmação) e «Acrescentar campo» (campo obrigatório exige valor por omissão; não se acrescentam chaves primárias). Mudar tipo/restrições de um campo existente NÃO é suportado (exigiria recriar a tabela).
@@ -85,17 +94,19 @@
 ## 6. Âmbito do ribbon (o que fica)
 
 - **Ficheiro**: Novo, Abrir, Guardar Cópia Como, Recentes, Fechar, Sair.
-- **Base**: Vistas (Folha de Dados / Estrutura / SQL), Cortar/Copiar/Colar, Ordenar e Filtrar (`ORDER BY` / `WHERE`), Registos (Novo, Guardar, Eliminar, Atualizar), Localizar. Saem: Pincel de Formatos, Formatação de Texto, Ortografia.
+- **Base**: Vistas (Folha de Dados / Estrutura / SQL), Cortar/Copiar (o Colar só por Ctrl+V), Ordenar e Filtrar (`ORDER BY` / `WHERE`), Registos (Novo, Eliminar, Atualizar, Totais), Localizar. Saem: Guardar (a gravação é automática), Pincel de Formatos, Formatação de Texto, Ortografia.
 - **Criar**: Tabela, Estrutura da Tabela, Consulta SQL. Saem: Modelos, Partes da Aplicação, Formulários, Relatórios, Macros e Código.
 - **Dados Externos**: Importar CSV, Exportar CSV. Saem: Excel, Outlook, dBASE, XML, HTML, Word.
 - **Ferramentas de Bases de Dados**: Relações (chaves estrangeiras), Índices, Compactar e Reparar (`VACUUM` + `integrity_check`). Saem: Documentador, Analisador, Mover Dados.
-- **Folha de Dados** (separador contextual): Novo campo, Eliminar campo, Renomear, Tipo de Dados, Validação (`NOT NULL`, `UNIQUE`, `CHECK`, `DEFAULT`).
+- **Folha de Dados** (separador contextual): Novo campo, Eliminar campo, Renomear. A validação de tipos e `NOT NULL` é automática ao gravar; `UNIQUE`, `CHECK` e relações ficam a cargo do SQLite. «Tipo de Dados» e a alteração de campos existentes ficam para uma fase posterior.
 
 ## 7. Identidade (a aplicar)
 
 - Título da janela: **AccesSQL**. `with_app_id("accessql")`.
 - Barra de título: «Base1 : Base de Dados SQLite - AccesSQL».
-- O ícone «A» vermelho mantém-se.
+- O ícone «A» vermelho mantém-se (substituir por ícone próprio: pendente).
+- `README.md` com descrição, compilação na FreeBSD e nota de não afiliação à Microsoft.
+- Licença **GPL-3.0-or-later**, texto oficial em `LICENSE`. Ícone e nome mais distinto: em aberto.
 
 ## 8. Problemas conhecidos
 
@@ -103,7 +114,7 @@ Resolvidos nos passos 1 e 2: dados fixos, `OBJECTS` constante, `Doc` sem dados, 
 
 Em aberto:
 
-1. Os valores gravam-se como texto e o SQLite converte conforme a afinidade da coluna; não há validação até ao passo 5.
+1. Resolvido: os valores entram como texto e o SQLite converte pela afinidade, mas agora há validação prévia de tipo/formato (`validacao.rs`).
 2. O diálogo de ficheiros (`rfd`) pode não abrir na FreeBSD; se falhar, acrescentar um campo de caminho no backstage.
 3. Avisos de código não usado (ex.: `Icon::Form`, imports) e botões do ribbon ainda sem função: limpeza no passo 7.
 4. A base de dados de demonstração (em memória, via `dados_exemplo.rs`) é temporária; sai no passo 7.
@@ -132,10 +143,16 @@ Em aberto:
 - [x] Passo 5b (melhorias pedidas, assumido testado): um só separador por objeto (a mudança de vista troca o modo no mesmo separador), F2 universal (célula, campo na estrutura, tabela/consulta no painel de navegação, com «Mudar o Nome» também no menu de contexto): escrito, **por compilar**.
 - [x] Passo 5c (testado): ordenar (A-Z/Z-A), filtrar (igual, diferente, contém, não contém), alternar/remover filtros, procurar na barra de registos com realce, menu na seta do cabeçalho e no botão direito: escrito, **por compilar**.
 - [x] Passo 6a: Dados Externos (importar e exportar CSV). Testado.
-- [~] Passo 6b-1: copiar/colar entre células (Ctrl+C, Ctrl+X, Ctrl+V) e Ctrl+' (valor da célula de cima), na folha de dados e durante a edição: escrito, **por compilar**.
-- [ ] Passo 6b-2 (Relações, Índices) e passo 7 (secção 9). Também por fazer: ordenar, filtrar e procurar na folha de dados (`ORDER BY` / `WHERE`).
+- [x] Passo 6b-1: copiar/colar entre células (Ctrl+C, Ctrl+X, Ctrl+V) e Ctrl+' (valor da célula de cima). Testado.
+- [x] Passo 6b-1b: colar vários campos e vários registos. Testado.
+- [x] Passo 7a (Editar): Desfazer/Refazer (Ctrl+Z, Ctrl+Y, QAT), botões Cortar/Copiar do ribbon. Testado.
+- [x] Passo 7b: limpeza do ribbon Base/Ferramentas/Folha de Dados, janela Totais, janela Índices, Novo/Renomear/Eliminar Campo a partir da folha de dados. Testado.
+- [x] Passo 7c: Relações (janela, `PRAGMA foreign_keys = ON`, campo «Refere a» na Vista Estrutura). Testado.
+- [x] Passo 7d: eliminar tabelas e consultas (confirmação, bloqueio por relações, aviso de consultas afetadas). Compilado; teste manual da janela pendente.
+- [x] Validação ao gravar: `validacao.rs` (tipos, obrigatório, datas, Sim/Não), ligada à edição de células, colagem e importação CSV; 6 testes unitários (`cargo test`).
+- [x] Limpeza de controlos sem função (Ajuda, Guardar, cartão «Base de Dados em Branco» agora ligado, cabeçalho de navegação, «Clique para Adicionar») e de código morto; `cargo check` sem avisos.
 
-**Próximo passo:** `touch src/*.rs` + `cargo run` com o pacote 6b e testar copiar/colar e Ctrl+'. Se Ctrl+' não funcionar no teclado português, usar `ACCESSQL_DEBUG=1` para ver se chega `Quote+Ctrl` e escolher outro atalho. Depois: Relações e Índices; validação na folha de dados; mudar tipo/obrigatório/omissão de campos existentes; limpeza do ribbon (passo 7); licença, README e LICENSE.
+**Próximo passo:** testar na interface a eliminação de objetos, a validação (gravar/colar/importar) e a cópia de segurança atómica. Depois: mudar tipo/obrigatório/omissão de campos existentes, remover a base de demonstração, identidade e licença.
 
 ## 11. Registo de sessões
 
@@ -159,3 +176,10 @@ _(Acrescentar uma linha por sessão: data, o que foi feito, ficheiros alterados,
 - 2026-11-06 h: passos 5b e 5c testados e a funcionar. Passo 6a escrito (sem compilar): `csvio.rs` (novo: análise de CSV, deteção de separador/codificação, diálogos de importação e exportação), `db.rs` (`inserir_linhas`, `eliminar_tabela`), `ribbon.rs` (Dados Externos reduzido a Importar/Exportar CSV), `estado.rs`, `app.rs`, `ficheiro.rs`, `estrutura.rs` (`recarregar_abertos` público), `main.rs`.
 - 2026-11-07: passo 6a testado (um ID repetido não grava nada; importar para tabela vazia e para tabela nova funcionam). Passo 6b-1 escrito (sem compilar): `area_trabalho.rs` (Ctrl+C/X/V, Ctrl+' na grelha e no editor da célula).
 - 2026-11-07 b: ao testar o 6b os ficheiros do `src/` estavam misturados de passos diferentes (erros de compilação em `Condicao`, `foco_nav`, etc.). Entregue `accessql_src_completo.zip` (todo o `src/`, sem `Cargo.toml`). Descoberto o motivo do Ctrl+' fazer zoom: ver regra acima.
+- 2026-11-07 c: passo 6b-1 testado (copiar, colar, cortar, registo inteiro, Ctrl+' na grelha e na edição). Notas do utilizador: colar na linha `(Novo)` não respeitava a numeração automática, colar um registo copiado não fazia nada e colar da folha de cálculo só trazia o 1.º valor. Corrigido em `area_trabalho.rs` (`colar_texto`, `recarregar_local`). Entregue de novo `accessql_src_completo.zip`.
+- 2026-11-07 d: criado `CHECKLIST.md` (linha orientadora do projeto; o `PROJETO.md` continua a ser o contexto de cada sessão). Passo 7a escrito (sem compilar): `desfazer.rs` (novo), `db.rs` (`valor_bruto`, `registo_bruto`, `definir_celula`, `inserir_bruto`, `inserir_linhas_ids`), `area_trabalho.rs` (histórico em `gravar_celula`, `eliminar_registo`, colagem; Ctrl+Z/Y; `clip_acao`), `ribbon.rs` (QAT e Área de Transferência), `estado.rs`, `ficheiro.rs`, `consulta.rs`, `estrutura.rs`, `renomear.rs`, `csvio.rs`, `main.rs`. Inclui o pacote 6b-1b da colagem de registos.
+- 2026-11-07 e: passo 7a testado (tudo bem). Passo 7b escrito (sem compilar): `totais.rs` e `indices.rs` (novos), `db.rs` (`Indice`, `lista_indices`, `criar_indice`, `eliminar_indice`), `ribbon.rs` (Registos: Totais; retirados Ortografia, Mais, Formatação de Texto, Macro, Documentador, Analisador, Mover Dados e os botões decorativos da Folha de Dados), `estrutura.rs` (`campo_na_estrutura`, `foco_novo`), `estado.rs`, `app.rs`, `ficheiro.rs`, `main.rs`.
+- 2026-11-07 f: passo 7b dado como testado (utilizador pediu para continuar). Passo 7c escrito (sem compilar): `relacoes.rs` (novo), `db.rs` (`Relacao`, `Campo.ref_tabela/ref_coluna`, `lista_relacoes`, `verificar_relacoes`, `opcoes_fk`, `foreign_keys_ativas`, `definir_foreign_keys`, `traduz` público, REFERENCES nas definições, `foreign_key_list` em `info_tabela`), `estrutura.rs` (coluna «Refere a», `combo_fk`), `ribbon.rs` (botão Relações), `area_trabalho.rs` (erros traduzidos), `estado.rs`, `app.rs`, `ficheiro.rs`, `main.rs`. Escolhida a integridade referencial ligada por defeito (o utilizador não respondeu à pergunta).
+- 2026-11-07 g: passos 7b e 7c testados (tudo bem). Passo 7d escrito (sem compilar): `eliminar_obj.rs` (novo), `db.rs` (`contar_registos`, `consultas_que_mencionam`, `eliminar_objeto`), `navegacao.rs` (menu «Eliminar (Delete)»), `app.rs` (Delete no painel), `estado.rs`, `ficheiro.rs`, `main.rs`. Por fazer a seguir: validação na folha de dados (em curso a análise: `TableData.tipos/obrig`, `validacao.rs`, `gravar_celula` com `reabrir`).
+- 2026-11-19: auditoria completa do working tree e melhoramentos. **Correções:** `guardar_copia` passou a gravar num ficheiro temporário e só depois substituir o destino (antes apagava o destino primeiro); `guardar_vista` verifica que a instrução é mesmo SELECT/WITH; mensagem de eliminação concorda com tabela/consulta e a seleção é reposta; `.gitignore` desduplicado. **Validação:** novo `validacao.rs` com testes (inteiros, reais, Sim/Não, datas com anos bissextos, obrigatório), metadados `TableData.tipos/obrig` obtidos por `PRAGMA table_info`, aplicados em `gravar_celula`, colagem e importação CSV (colagem/importação validam tudo antes de gravar). **Limpeza:** removidos menus pendentes (`menus.rs`, `dd_items`, campo `dropdown`, `act`/`rb`/`stack`), botões Ajuda e Guardar, cartão inativo ligado a Novo, texto «Clique para Adicionar», ícones/variáveis mortas e `id_source` → `id_salt`. `cargo check` sem avisos; `cargo test`: 6/6. Ficheiros alterados: `main.rs`, `db.rs`, `validacao.rs` (novo), `area_trabalho.rs`, `csvio.rs`, `ficheiro.rs`, `eliminar_obj.rs`, `consulta.rs`, `estrutura.rs`, `indices.rs`, `relacoes.rs`, `estado.rs`, `app.rs`, `ribbon.rs`, `navegacao.rs`, `backstage.rs`, `icones.rs`, `widgets.rs`, `filtros.rs`, `dados_exemplo.rs`, `.gitignore`, `PROJETO.md`, `CHECKLIST.md`; eliminado `menus.rs`. Por fazer: testes manuais na interface e o resto da checklist.
+- 2026-11-19 b: utilizador confirmou os testes na interface. Commit local de todo o trabalho pendente (passos 7a–7d + melhoramentos), identidade e licença: novo `README.md` (descrição, compilação FreeBSD, não afiliação, avisos das dependências), `LICENSE` com o texto oficial da GPL-3.0-or-later, `.gitignore` com resíduos do Hugo. Removidos `.hugo_build.lock` e `public/`. Ficheiros alterados: `README.md`, `LICENSE` (novos), `.gitignore`, `PROJETO.md`, `CHECKLIST.md`. Por fazer: ícone próprio, nome mais distinto, build release.

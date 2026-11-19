@@ -97,6 +97,10 @@ impl AccessApp {
                 return;
             }
         };
+        let alterou = match &res {
+            Ok(r) => r.afetadas > 0 || r.dados.is_none(),
+            Err(_) => false,
+        };
         let doc = &mut self.docs[self.active];
         match res {
             Ok(r) => {
@@ -124,6 +128,9 @@ impl AccessApp {
         self.sel = (0, 1);
         self.row_sel = false;
         self.refresh_nav();
+        if alterou {
+            self.limpar_historico();
+        }
     }
 
     /// «Guardar como Consulta»: grava logo se já tem nome, senão pede o nome.
@@ -223,7 +230,7 @@ impl AccessApp {
         ui.add_space(4.0);
         let altura = (ui.available_height() * 0.38).clamp(90.0, 320.0);
         let mut sql = std::mem::take(&mut self.docs[self.active].sql);
-        egui::ScrollArea::vertical().id_source("sql_scroll").max_height(altura).auto_shrink([false, true]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("sql_scroll").max_height(altura).auto_shrink([false, true]).show(ui, |ui| {
             ui.add(
                 egui::TextEdit::multiline(&mut sql)
                     .id(egui::Id::new("sql_editor"))
