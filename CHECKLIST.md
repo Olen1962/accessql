@@ -28,7 +28,7 @@ Atualizada em 2026-11-19.
   - [x] Setas, Ctrl+setas, Home, End, PgUp, PgDn
   - [x] Backspace e setas nas caixas de texto (correção do método de entrada do X11)
   - [x] Zoom do teclado do egui desativado (conflitava com o apóstrofo em teclados portugueses)
-  - [x] Ctrl + roda do rato aumenta/diminui a escala de toda a interface (0,5× a 2,5×, em passos de 5%)
+  - [x] Ctrl + roda do rato aumenta/diminui a escala de toda a interface (0,5× a 2,5×, em passos de 5%; para baixo aumenta, para cima diminui)
   - [ ] Confirmar acentos (ç, ã, é) depois da correção do teclado
   - [x] Desfazer e Refazer: Ctrl+Z, Ctrl+Y (ou Ctrl+Shift+Z) e botões da barra de acesso rápido; cobrem células, registos criados e eliminados, colagens
   - [ ] Ctrl+; (data de hoje) e Ctrl+Shift+; (hora) (sugestão)
@@ -80,10 +80,10 @@ Atualizada em 2026-11-19.
   - [x] Tabelas e Consultas lidas do catálogo da base de dados
   - [x] Caixa «Procurar...» a filtrar a lista
   - [x] Abrir por duplo clique
-  - [x] Menu de contexto: Abrir, Vista Estrutura, Vista SQL, Mudar o Nome (F2)
+  - [x] Menu de contexto: Abrir, Vista Estrutura, Vista SQL, Mudar o Nome (F2), Duplicar (Ctrl+D)
   - [x] Um só separador por objeto (a mudança de vista troca o modo no mesmo separador)
   - [x] Eliminar tabela ou consulta (Delete ou botão direito), com confirmação; recusa eliminar tabelas referidas por relações; avisa das consultas que as usam (implementado; falta teste manual)
-  - [ ] Duplicar tabela ou consulta
+  - [x] Duplicar tabela ou consulta (Ctrl+D ou menu de contexto; copia estrutura, dados, índices e gatilhos)
   - [ ] Agrupar ou ocultar objetos
 
 - **Folha de dados**

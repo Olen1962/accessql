@@ -25,7 +25,10 @@ impl AccessApp {
             self.msg = "Abra ou crie uma base de dados primeiro".into();
             return;
         };
-        let mut e = EstRelacoes { impor: db.foreign_keys_ativas(), ..Default::default() };
+        let mut e = EstRelacoes {
+            impor: db.foreign_keys_ativas(),
+            ..Default::default()
+        };
         match db.lista_relacoes() {
             Ok(l) => e.lista = l,
             Err(err) => {
@@ -37,7 +40,9 @@ impl AccessApp {
     }
 
     pub(crate) fn dialogo_relacoes(&mut self, ctx: &egui::Context) {
-        let Some(mut e) = self.relacoes.take() else { return };
+        let Some(mut e) = self.relacoes.take() else {
+            return;
+        };
         let mut aberto = true;
         let mut ac: Option<AcR> = None;
         egui::Window::new("Relações")
@@ -111,7 +116,11 @@ impl AccessApp {
                 let r = self.db.as_ref().map(|db| db.definir_foreign_keys(on));
                 match r {
                     Some(Ok(())) => {
-                        e.info = if on { "Integridade referencial ligada".into() } else { "Integridade referencial desligada".into() };
+                        e.info = if on {
+                            "Integridade referencial ligada".into()
+                        } else {
+                            "Integridade referencial desligada".into()
+                        };
                         e.info_erro = false;
                     }
                     Some(Err(err)) => {

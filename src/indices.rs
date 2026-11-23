@@ -40,7 +40,10 @@ impl AccessApp {
             self.msg = "Não há tabelas".into();
             return;
         };
-        let mut e = EstIndices { tabela, ..Default::default() };
+        let mut e = EstIndices {
+            tabela,
+            ..Default::default()
+        };
         self.carregar_indices(&mut e);
         self.indices = Some(e);
     }
@@ -62,8 +65,14 @@ impl AccessApp {
     }
 
     pub(crate) fn dialogo_indices(&mut self, ctx: &egui::Context) {
-        let Some(mut e) = self.indices.take() else { return };
-        let tabelas: Vec<String> = self.nav.first().map(|g| g.items.clone()).unwrap_or_default();
+        let Some(mut e) = self.indices.take() else {
+            return;
+        };
+        let tabelas: Vec<String> = self
+            .nav
+            .first()
+            .map(|g| g.items.clone())
+            .unwrap_or_default();
         let mut aberto = true;
         let mut ac: Option<AcI> = None;
         egui::Window::new("Índices")
@@ -89,7 +98,10 @@ impl AccessApp {
                 ui.separator();
                 if let Some(nome) = e.eliminar.clone() {
                     ui.horizontal_wrapped(|ui| {
-                        ui.colored_label(egui::Color32::from_rgb(0xB0, 0x00, 0x20), format!("Eliminar o índice «{}»?", nome));
+                        ui.colored_label(
+                            egui::Color32::from_rgb(0xB0, 0x00, 0x20),
+                            format!("Eliminar o índice «{}»?", nome),
+                        );
                         if ui.button("Sim, eliminar").clicked() {
                             ac = Some(AcI::Eliminar(nome.clone()));
                         }
@@ -101,31 +113,34 @@ impl AccessApp {
                 if e.lista.is_empty() {
                     ui.label("Esta tabela ainda não tem índices.");
                 } else {
-                    egui::Grid::new("indices_grid").striped(true).spacing([16.0, 5.0]).show(ui, |ui| {
-                        for h in ["Nome", "Campos", "Único", "Origem", ""] {
-                            ui.label(RichText::new(h).strong());
-                        }
-                        ui.end_row();
-                        for ix in &e.lista {
-                            ui.label(&ix.nome);
-                            ui.label(ix.colunas.join(", "));
-                            ui.label(if ix.unico { "Sim" } else { "Não" });
-                            ui.label(match ix.origem.as_str() {
-                                "c" => "criado por si",
-                                "u" => "restrição UNIQUE",
-                                "pk" => "chave primária",
-                                _ => "outra",
-                            });
-                            if ix.origem == "c" {
-                                if ui.small_button("Eliminar").clicked() {
-                                    e.eliminar = Some(ix.nome.clone());
-                                }
-                            } else {
-                                ui.label("");
+                    egui::Grid::new("indices_grid")
+                        .striped(true)
+                        .spacing([16.0, 5.0])
+                        .show(ui, |ui| {
+                            for h in ["Nome", "Campos", "Único", "Origem", ""] {
+                                ui.label(RichText::new(h).strong());
                             }
                             ui.end_row();
-                        }
-                    });
+                            for ix in &e.lista {
+                                ui.label(&ix.nome);
+                                ui.label(ix.colunas.join(", "));
+                                ui.label(if ix.unico { "Sim" } else { "Não" });
+                                ui.label(match ix.origem.as_str() {
+                                    "c" => "criado por si",
+                                    "u" => "restrição UNIQUE",
+                                    "pk" => "chave primária",
+                                    _ => "outra",
+                                });
+                                if ix.origem == "c" {
+                                    if ui.small_button("Eliminar").clicked() {
+                                        e.eliminar = Some(ix.nome.clone());
+                                    }
+                                } else {
+                                    ui.label("");
+                                }
+                                ui.end_row();
+                            }
+                        });
                 }
                 ui.separator();
                 ui.label(RichText::new("Criar um índice novo").strong());
@@ -168,13 +183,22 @@ impl AccessApp {
                 self.carregar_indices(&mut e);
             }
             Some(AcI::Criar) => {
-                let cols: Vec<String> = e.colunas.iter().zip(e.sel.iter()).filter(|(_, s)| **s).map(|(c, _)| c.clone()).collect();
+                let cols: Vec<String> = e
+                    .colunas
+                    .iter()
+                    .zip(e.sel.iter())
+                    .filter(|(_, s)| **s)
+                    .map(|(c, _)| c.clone())
+                    .collect();
                 let nome = if e.nome.trim().is_empty() {
                     format!("idx_{}_{}", e.tabela, cols.join("_"))
                 } else {
                     e.nome.trim().to_string()
                 };
-                let r = self.db.as_ref().map(|db| db.criar_indice(&nome, &e.tabela, &cols, e.unico));
+                let r = self
+                    .db
+                    .as_ref()
+                    .map(|db| db.criar_indice(&nome, &e.tabela, &cols, e.unico));
                 match r {
                     Some(Ok(())) => {
                         self.carregar_indices(&mut e);

@@ -1,9 +1,6 @@
 //! Dados Externos: importar e exportar ficheiros CSV.
 
-use crate::{
-    db::Campo,
-    estado::*,
-};
+use crate::{db::Campo, estado::*};
 use eframe::egui::{self, Align2, RichText, Vec2};
 use std::path::Path;
 
@@ -147,16 +144,27 @@ fn cp1252(b: u8) -> char {
 
 /// UTF-8 (com ou sem BOM) ou, se não for válido, Windows-1252 (o que o Excel costuma gravar).
 fn decodificar(bytes: Vec<u8>) -> (String, &'static str) {
-    let bytes = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) { bytes[3..].to_vec() } else { bytes };
+    let bytes = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        bytes[3..].to_vec()
+    } else {
+        bytes
+    };
     match String::from_utf8(bytes) {
         Ok(s) => (s, "UTF-8"),
-        Err(e) => (e.into_bytes().into_iter().map(cp1252).collect(), "Windows-1252"),
+        Err(e) => (
+            e.into_bytes().into_iter().map(cp1252).collect(),
+            "Windows-1252",
+        ),
     }
 }
 
 /// Valor numérico «limpo» (sem zeros à esquerda, que indicam códigos como 0123).
 fn numerico_valido(v: &str, virgula: bool) -> Option<f64> {
-    let t = if virgula { v.replace(',', ".") } else { v.to_string() };
+    let t = if virgula {
+        v.replace(',', ".")
+    } else {
+        v.to_string()
+    };
     if !t.chars().all(|c| c.is_ascii_digit() || "+-.eE".contains(c)) {
         return None;
     }
@@ -180,7 +188,11 @@ fn inferir_tipo(linhas: &[Vec<String>], col: usize, virgula: bool) -> &'static s
         match numerico_valido(v, virgula) {
             None => return "TEXT",
             Some(_) => {
-                let t = if virgula { v.replace(',', ".") } else { v.to_string() };
+                let t = if virgula {
+                    v.replace(',', ".")
+                } else {
+                    v.to_string()
+                };
                 if inteiro && t.parse::<i64>().is_err() {
                     inteiro = false;
                 }
@@ -201,13 +213,24 @@ fn inferir_tipo(linhas: &[Vec<String>], col: usize, virgula: bool) -> &'static s
 
 fn numerica(tipo: &str) -> bool {
     let t = tipo.to_ascii_uppercase();
-    t.contains("INT") || t.contains("REAL") || t.contains("FLOA") || t.contains("DOUB") || t.contains("NUMERIC") || t.contains("DECIMAL")
+    t.contains("INT")
+        || t.contains("REAL")
+        || t.contains("FLOA")
+        || t.contains("DOUB")
+        || t.contains("NUMERIC")
+        || t.contains("DECIMAL")
 }
 
 /// Valida todas as linhas importadas antes de as inserir (a importação é uma transação).
-fn validar_linhas(campos: &[Campo], mapa: &[(usize, String, bool)], dados: &[Vec<String>]) -> Result<(), String> {
+fn validar_linhas(
+    campos: &[Campo],
+    mapa: &[(usize, String, bool)],
+    dados: &[Vec<String>],
+) -> Result<(), String> {
     for &(ci, ref nome, _) in mapa {
-        let Some(campo) = campos.iter().find(|f| f.nome.eq_ignore_ascii_case(nome)) else { continue };
+        let Some(campo) = campos.iter().find(|f| f.nome.eq_ignore_ascii_case(nome)) else {
+            continue;
+        };
         for (k, linha) in dados.iter().enumerate() {
             let valor = linha.get(ci).map(String::as_str).unwrap_or("");
             crate::validacao::validar(&campo.tipo, campo.obrigatorio, valor, nome)
@@ -220,7 +243,10 @@ fn validar_linhas(campos: &[Campo], mapa: &[(usize, String, bool)], dados: &[Vec
 fn nomes_campos(cab: Option<&Vec<String>>, n: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for i in 0..n {
-        let mut nome = cab.and_then(|c| c.get(i)).map(|s| s.trim().to_string()).unwrap_or_default();
+        let mut nome = cab
+            .and_then(|c| c.get(i))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
         if nome.is_empty() {
             nome = format!("campo{}", i + 1);
         }
@@ -243,7 +269,12 @@ fn campo_csv(v: &str, sep: char) -> String {
     }
 }
 
-fn escrever_csv(path: &Path, cols: &[String], rows: &[Vec<String>], e: &ExportCsv) -> std::io::Result<()> {
+fn escrever_csv(
+    path: &Path,
+    cols: &[String],
+    rows: &[Vec<String>],
+    e: &ExportCsv,
+) -> std::io::Result<()> {
     let sep = e.sep.to_string();
     let mut s = String::new();
     if e.cabecalho {
@@ -291,8 +322,14 @@ impl AccessApp {
             self.msg = "O ficheiro está vazio".into();
             return;
         }
-        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "importada".into());
-        let nome_ficheiro = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "importada".into());
+        let nome_ficheiro = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         self.importar = Some(ImportCsv {
             nome_ficheiro,
             bruto,
@@ -312,16 +349,29 @@ impl AccessApp {
     /// «Exportar → Ficheiro CSV»: exporta o que está no separador ativo.
     pub(crate) fn pedir_exportar_csv(&mut self) {
         match self.docs.get(self.active) {
-            Some(d) if matches!(d.kind, ObjKind::Table | ObjKind::Query | ObjKind::Sql) && !d.data.cols.is_empty() => {
-                self.exportar_csv = Some(ExportCsv { sep: ';', cabecalho: true, bom: true });
+            Some(d)
+                if matches!(d.kind, ObjKind::Table | ObjKind::Query | ObjKind::Sql)
+                    && !d.data.cols.is_empty() =>
+            {
+                self.exportar_csv = Some(ExportCsv {
+                    sep: ';',
+                    cabecalho: true,
+                    bom: true,
+                });
             }
             _ => self.msg = "Abra uma tabela ou consulta com dados para a exportar".into(),
         }
     }
 
     pub(crate) fn dialogo_exportar_csv(&mut self, ctx: &egui::Context) {
-        let Some(mut e) = self.exportar_csv.take() else { return };
-        let nome = self.docs.get(self.active).map(|d| d.name.clone()).unwrap_or_default();
+        let Some(mut e) = self.exportar_csv.take() else {
+            return;
+        };
+        let nome = self
+            .docs
+            .get(self.active)
+            .map(|d| d.name.clone())
+            .unwrap_or_default();
         let mut acao: Option<bool> = None;
         egui::Window::new("Exportar para CSV")
             .collapsible(false)
@@ -367,20 +417,38 @@ impl AccessApp {
             .save_file()
         else {
             // o utilizador cancelou a escolha do ficheiro: volta ao diálogo
-            self.exportar_csv = Some(ExportCsv { sep: e.sep, cabecalho: e.cabecalho, bom: e.bom });
+            self.exportar_csv = Some(ExportCsv {
+                sep: e.sep,
+                cabecalho: e.cabecalho,
+                bom: e.bom,
+            });
             return;
         };
-        let Some(doc) = self.docs.get(self.active) else { return };
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
         let cols: Vec<String> = doc.data.cols.iter().map(|c| c.0.clone()).collect();
         match escrever_csv(&path, &cols, &doc.data.rows, e) {
-            Ok(()) => self.msg = format!("Exportadas {} linha(s) para {}", doc.data.rows.len(), path.display()),
+            Ok(()) => {
+                self.msg = format!(
+                    "Exportadas {} linha(s) para {}",
+                    doc.data.rows.len(),
+                    path.display()
+                )
+            }
             Err(err) => self.msg = format!("Não foi possível gravar o ficheiro: {}", err),
         }
     }
 
     pub(crate) fn dialogo_importar_csv(&mut self, ctx: &egui::Context) {
-        let Some(mut imp) = self.importar.take() else { return };
-        let tabelas: Vec<String> = self.nav.first().map(|g| g.items.clone()).unwrap_or_default();
+        let Some(mut imp) = self.importar.take() else {
+            return;
+        };
+        let tabelas: Vec<String> = self
+            .nav
+            .first()
+            .map(|g| g.items.clone())
+            .unwrap_or_default();
         let mut acao: Option<bool> = None;
         egui::Window::new("Importar Ficheiro CSV")
             .collapsible(false)
@@ -388,7 +456,10 @@ impl AccessApp {
             .default_width(620.0)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.label(format!("Ficheiro: {}   ({})", imp.nome_ficheiro, imp.codificacao));
+                ui.label(format!(
+                    "Ficheiro: {}   ({})",
+                    imp.nome_ficheiro, imp.codificacao
+                ));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label("Separador:");
@@ -401,12 +472,19 @@ impl AccessApp {
                             }
                         });
                 });
-                ui.checkbox(&mut imp.cabecalho, "A primeira linha tem os nomes dos campos");
+                ui.checkbox(
+                    &mut imp.cabecalho,
+                    "A primeira linha tem os nomes dos campos",
+                );
                 ui.checkbox(&mut imp.virgula, "A vírgula é o separador decimal (1,5)");
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.radio_value(&mut imp.novo, true, "Criar uma tabela nova:");
-                    ui.add(egui::TextEdit::singleline(&mut imp.nome_novo).id(egui::Id::new("csv_nome_novo")).desired_width(200.0));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut imp.nome_novo)
+                            .id(egui::Id::new("csv_nome_novo"))
+                            .desired_width(200.0),
+                    );
                 });
                 ui.horizontal(|ui| {
                     ui.add_enabled_ui(!tabelas.is_empty(), |ui| {
@@ -423,30 +501,45 @@ impl AccessApp {
                 });
                 ui.separator();
                 let ncols = imp.linhas.iter().map(|l| l.len()).max().unwrap_or(0);
-                let dados = imp.linhas.len().saturating_sub(if imp.cabecalho { 1 } else { 0 });
-                ui.label(format!("{} linha(s) de dados, {} coluna(s). Pré-visualização:", dados, ncols));
-                egui::ScrollArea::both().id_salt("csv_prev_scroll").max_height(170.0).show(ui, |ui| {
-                    egui::Grid::new("csv_prev").striped(true).spacing([14.0, 4.0]).show(ui, |ui| {
-                        for (ri, l) in imp.linhas.iter().take(7).enumerate() {
-                            for c in l.iter().take(10) {
-                                let t = abreviar(c, 22);
-                                if ri == 0 && imp.cabecalho {
-                                    ui.label(RichText::new(t).strong());
-                                } else {
-                                    ui.label(t);
+                let dados = imp
+                    .linhas
+                    .len()
+                    .saturating_sub(if imp.cabecalho { 1 } else { 0 });
+                ui.label(format!(
+                    "{} linha(s) de dados, {} coluna(s). Pré-visualização:",
+                    dados, ncols
+                ));
+                egui::ScrollArea::both()
+                    .id_salt("csv_prev_scroll")
+                    .max_height(170.0)
+                    .show(ui, |ui| {
+                        egui::Grid::new("csv_prev")
+                            .striped(true)
+                            .spacing([14.0, 4.0])
+                            .show(ui, |ui| {
+                                for (ri, l) in imp.linhas.iter().take(7).enumerate() {
+                                    for c in l.iter().take(10) {
+                                        let t = abreviar(c, 22);
+                                        if ri == 0 && imp.cabecalho {
+                                            ui.label(RichText::new(t).strong());
+                                        } else {
+                                            ui.label(t);
+                                        }
+                                    }
+                                    ui.end_row();
                                 }
-                            }
-                            ui.end_row();
-                        }
+                            });
                     });
-                });
                 if !imp.erro.is_empty() {
                     ui.add_space(4.0);
                     ui.colored_label(egui::Color32::from_rgb(0xB0, 0x00, 0x20), imp.erro.clone());
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new("Importar").min_size(Vec2::new(90.0, 24.0))).clicked() {
+                    if ui
+                        .add(egui::Button::new("Importar").min_size(Vec2::new(90.0, 24.0)))
+                        .clicked()
+                    {
                         acao = Some(true);
                     }
                     if ui.button("Cancelar").clicked() {
@@ -480,18 +573,28 @@ impl AccessApp {
         if ncols == 0 {
             return Err("O ficheiro não tem colunas".into());
         }
-        let (cab, dados): (Option<&Vec<String>>, &[Vec<String>]) =
-            if imp.cabecalho { (imp.linhas.first(), &imp.linhas[1..]) } else { (None, &imp.linhas[..]) };
+        let (cab, dados): (Option<&Vec<String>>, &[Vec<String>]) = if imp.cabecalho {
+            (imp.linhas.first(), &imp.linhas[1..])
+        } else {
+            (None, &imp.linhas[..])
+        };
         let nomes = nomes_campos(cab, ncols);
         if imp.novo {
-            let tipos: Vec<&str> = (0..ncols).map(|c| inferir_tipo(dados, c, imp.virgula)).collect();
+            let tipos: Vec<&str> = (0..ncols)
+                .map(|c| inferir_tipo(dados, c, imp.virgula))
+                .collect();
             let campos: Vec<Campo> = nomes
                 .iter()
                 .zip(tipos.iter())
-                .map(|(n, t)| Campo { nome: n.clone(), tipo: t.to_string(), ..Default::default() })
+                .map(|(n, t)| Campo {
+                    nome: n.clone(),
+                    tipo: t.to_string(),
+                    ..Default::default()
+                })
                 .collect();
-            let mapa: Vec<(usize, String, bool)> =
-                (0..ncols).map(|i| (i, nomes[i].clone(), tipos[i] != "TEXT")).collect();
+            let mapa: Vec<(usize, String, bool)> = (0..ncols)
+                .map(|i| (i, nomes[i].clone(), tipos[i] != "TEXT"))
+                .collect();
             validar_linhas(&campos, &mapa, dados)?;
             let nome = imp.nome_novo.trim().to_string();
             let n = {
@@ -508,11 +611,25 @@ impl AccessApp {
             self.limpar_historico();
             self.refresh_nav();
             self.open_doc(ObjKind::Table, nome.clone());
-            Ok(format!("Importadas {} linha(s) para a tabela nova «{}»", n, nome))
+            Ok(format!(
+                "Importadas {} linha(s) para a tabela nova «{}»",
+                n, nome
+            ))
         } else {
-            let tabelas: Vec<String> = self.nav.first().map(|g| g.items.clone()).unwrap_or_default();
-            let destino = tabelas.get(imp.destino).cloned().ok_or("Escolha a tabela de destino")?;
-            let (campos, _) = self.db.as_ref().ok_or("Nenhuma base de dados aberta")?.info_tabela(&destino)?;
+            let tabelas: Vec<String> = self
+                .nav
+                .first()
+                .map(|g| g.items.clone())
+                .unwrap_or_default();
+            let destino = tabelas
+                .get(imp.destino)
+                .cloned()
+                .ok_or("Escolha a tabela de destino")?;
+            let (campos, _) = self
+                .db
+                .as_ref()
+                .ok_or("Nenhuma base de dados aberta")?
+                .info_tabela(&destino)?;
             let mut mapa: Vec<(usize, String, bool)> = Vec::new();
             if imp.cabecalho {
                 for (i, n) in nomes.iter().enumerate() {
@@ -526,7 +643,10 @@ impl AccessApp {
                 }
             }
             if mapa.is_empty() {
-                return Err("Nenhuma coluna do ficheiro corresponde a campos da tabela (compare os nomes)".into());
+                return Err(
+                    "Nenhuma coluna do ficheiro corresponde a campos da tabela (compare os nomes)"
+                        .into(),
+                );
             }
             validar_linhas(&campos, &mapa, dados)?;
             let n = self
@@ -537,9 +657,18 @@ impl AccessApp {
             self.limpar_historico();
             self.recarregar_abertos(&destino);
             let ignoradas = ncols - mapa.len().min(ncols);
-            let extra = if ignoradas > 0 { format!(" ({} coluna(s) do ficheiro sem campo correspondente foram ignoradas)", ignoradas) } else { String::new() };
-            Ok(format!("Importadas {} linha(s) para «{}»{}", n, destino, extra))
+            let extra = if ignoradas > 0 {
+                format!(
+                    " ({} coluna(s) do ficheiro sem campo correspondente foram ignoradas)",
+                    ignoradas
+                )
+            } else {
+                String::new()
+            };
+            Ok(format!(
+                "Importadas {} linha(s) para «{}»{}",
+                n, destino, extra
+            ))
         }
     }
 }
-

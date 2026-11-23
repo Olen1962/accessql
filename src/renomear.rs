@@ -13,7 +13,9 @@ impl AccessApp {
     }
 
     pub(crate) fn dialogo_renomear(&mut self, ctx: &egui::Context) {
-        let Some((kind, de, mut texto)) = self.renomear_obj.clone() else { return };
+        let Some((kind, de, mut texto)) = self.renomear_obj.clone() else {
+            return;
+        };
         let mut acao: Option<bool> = None;
         egui::Window::new("Mudar o Nome")
             .collapsible(false)
@@ -21,7 +23,11 @@ impl AccessApp {
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.label(format!("Novo nome para «{}»:", de));
-                let r = ui.add(egui::TextEdit::singleline(&mut texto).id(egui::Id::new("nome_objeto")).desired_width(260.0));
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut texto)
+                        .id(egui::Id::new("nome_objeto"))
+                        .desired_width(260.0),
+                );
                 r.request_focus();
                 if r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     acao = Some(true);
@@ -65,6 +71,7 @@ impl AccessApp {
                         ObjKind::Table | ObjKind::Query => true,
                         ObjKind::Design => d.estr.as_ref().map_or(false, |e| !e.nova),
                         ObjKind::Sql => d.vista.as_deref() == Some(de),
+                        ObjKind::QueryDesign => d.qbe.is_some(),
                     };
                     if do_objeto && d.name == de {
                         d.name = para.to_string();

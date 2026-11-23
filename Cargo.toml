@@ -7,3 +7,5 @@ edition = "2021"
 eframe = "0.29"
 rfd = "0.15"
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Para parser SQL futuro (opcional agora):
+# sqlparser = { version = "0.40", features = ["sqlite"] }

@@ -6,17 +6,36 @@ use rusqlite::types::Value;
 /// Uma alteração feita aos dados, com o que é preciso para a desfazer e refazer.
 pub(crate) enum Acao {
     /// Célula alterada. `rowid_depois` só difere de `rowid` se se mudou o campo de chave.
-    Celula { tabela: String, rowid: i64, rowid_depois: i64, col: String, antigo: Value, novo: Value },
+    Celula {
+        tabela: String,
+        rowid: i64,
+        rowid_depois: i64,
+        col: String,
+        antigo: Value,
+        novo: Value,
+    },
     /// Registo criado (guarda-se o conteúdo para o poder refazer).
-    Inserido { tabela: String, rowid: i64, colunas: Vec<String>, valores: Vec<Value> },
+    Inserido {
+        tabela: String,
+        rowid: i64,
+        colunas: Vec<String>,
+        valores: Vec<Value>,
+    },
     /// Registo eliminado (guarda-se o conteúdo para o poder repor).
-    Apagado { tabela: String, rowid: i64, colunas: Vec<String>, valores: Vec<Value> },
+    Apagado {
+        tabela: String,
+        rowid: i64,
+        colunas: Vec<String>,
+        valores: Vec<Value>,
+    },
 }
 
 impl Acao {
     pub(crate) fn tabela(&self) -> &str {
         match self {
-            Acao::Celula { tabela, .. } | Acao::Inserido { tabela, .. } | Acao::Apagado { tabela, .. } => tabela,
+            Acao::Celula { tabela, .. }
+            | Acao::Inserido { tabela, .. }
+            | Acao::Apagado { tabela, .. } => tabela,
         }
     }
 
@@ -30,17 +49,43 @@ impl Acao {
 
     fn desfazer(&self, db: &Database) -> Result<(), String> {
         match self {
-            Acao::Celula { tabela, rowid_depois, col, antigo, .. } => db.definir_celula(tabela, col, *rowid_depois, antigo),
-            Acao::Inserido { tabela, rowid, .. } => db.delete_row(tabela, *rowid).map_err(|e| e.to_string()),
-            Acao::Apagado { tabela, rowid, colunas, valores } => db.inserir_bruto(tabela, *rowid, colunas, valores),
+            Acao::Celula {
+                tabela,
+                rowid_depois,
+                col,
+                antigo,
+                ..
+            } => db.definir_celula(tabela, col, *rowid_depois, antigo),
+            Acao::Inserido { tabela, rowid, .. } => {
+                db.delete_row(tabela, *rowid).map_err(|e| e.to_string())
+            }
+            Acao::Apagado {
+                tabela,
+                rowid,
+                colunas,
+                valores,
+            } => db.inserir_bruto(tabela, *rowid, colunas, valores),
         }
     }
 
     fn refazer(&self, db: &Database) -> Result<(), String> {
         match self {
-            Acao::Celula { tabela, rowid, col, novo, .. } => db.definir_celula(tabela, col, *rowid, novo),
-            Acao::Inserido { tabela, rowid, colunas, valores } => db.inserir_bruto(tabela, *rowid, colunas, valores),
-            Acao::Apagado { tabela, rowid, .. } => db.delete_row(tabela, *rowid).map_err(|e| e.to_string()),
+            Acao::Celula {
+                tabela,
+                rowid,
+                col,
+                novo,
+                ..
+            } => db.definir_celula(tabela, col, *rowid, novo),
+            Acao::Inserido {
+                tabela,
+                rowid,
+                colunas,
+                valores,
+            } => db.inserir_bruto(tabela, *rowid, colunas, valores),
+            Acao::Apagado { tabela, rowid, .. } => {
+                db.delete_row(tabela, *rowid).map_err(|e| e.to_string())
+            }
         }
     }
 }
@@ -77,17 +122,34 @@ impl AccessApp {
 
     fn passo(&mut self, desfazer: bool) {
         self.fechar_passo();
-        let passo = if desfazer { self.undo.pop() } else { self.redo.pop() };
+        let passo = if desfazer {
+            self.undo.pop()
+        } else {
+            self.redo.pop()
+        };
         let Some(passo) = passo else {
-            self.msg = if desfazer { "Não há nada para desfazer" } else { "Não há nada para refazer" }.into();
+            self.msg = if desfazer {
+                "Não há nada para desfazer"
+            } else {
+                "Não há nada para refazer"
+            }
+            .into();
             return;
         };
         let mut erro: Option<String> = None;
         let mut tabelas: Vec<String> = Vec::new();
         if let Some(db) = self.db.as_ref() {
-            let it: Box<dyn Iterator<Item = &Acao> + '_> = if desfazer { Box::new(passo.iter().rev()) } else { Box::new(passo.iter()) };
+            let it: Box<dyn Iterator<Item = &Acao> + '_> = if desfazer {
+                Box::new(passo.iter().rev())
+            } else {
+                Box::new(passo.iter())
+            };
             for a in it {
-                let r = if desfazer { a.desfazer(db) } else { a.refazer(db) };
+                let r = if desfazer {
+                    a.desfazer(db)
+                } else {
+                    a.refazer(db)
+                };
                 if let Err(e) = r {
                     erro = Some(e);
                     break;
@@ -97,8 +159,16 @@ impl AccessApp {
         }
         match erro {
             None => {
-                let desc = if passo.len() == 1 { passo[0].descricao().to_string() } else { format!("{} alterações", passo.len()) };
-                self.msg = format!("{}: {}", if desfazer { "Desfeito" } else { "Refeito" }, desc);
+                let desc = if passo.len() == 1 {
+                    passo[0].descricao().to_string()
+                } else {
+                    format!("{} alterações", passo.len())
+                };
+                self.msg = format!(
+                    "{}: {}",
+                    if desfazer { "Desfeito" } else { "Refeito" },
+                    desc
+                );
                 if desfazer {
                     self.redo.push(passo);
                 } else {

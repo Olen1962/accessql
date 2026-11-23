@@ -8,7 +8,9 @@ pub(crate) fn pasta_inicial() -> String {
 }
 
 fn nome_de(path: &Path) -> String {
-    path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 impl AccessApp {
@@ -44,7 +46,10 @@ impl AccessApp {
 
     pub(crate) fn dialogo_abrir(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Bases de dados AccesSQL (accsql, sqlite, db)", &["accsql", "sqlite", "sqlite3", "db"])
+            .add_filter(
+                "Bases de dados AccesSQL (accsql, sqlite, db)",
+                &["accsql", "sqlite", "sqlite3", "db"],
+            )
             .pick_file()
         {
             self.abrir_ficheiro(path);
@@ -172,7 +177,9 @@ impl AccessApp {
             return;
         };
         match db.compact() {
-            Ok(r) if r == "ok" => self.msg = "Base de dados verificada e compactada: sem erros".into(),
+            Ok(r) if r == "ok" => {
+                self.msg = "Base de dados verificada e compactada: sem erros".into()
+            }
             Ok(r) => self.msg = format!("A verificação encontrou problemas: {}", r),
             Err(e) => self.msg = e,
         }

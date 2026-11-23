@@ -23,19 +23,33 @@ impl AccessApp {
             self.totais_aberto = false;
             return;
         };
-        if !matches!(doc.kind, ObjKind::Table | ObjKind::Query | ObjKind::Sql) || doc.data.cols.is_empty() {
+        if !matches!(doc.kind, ObjKind::Table | ObjKind::Query | ObjKind::Sql)
+            || doc.data.cols.is_empty()
+        {
             self.totais_aberto = false;
             self.msg = "Abra uma tabela ou consulta com dados para ver os totais".into();
             return;
         }
         let col = self.sel.1.min(doc.data.cols.len() - 1);
         let nome = doc.data.cols[col].0.clone();
-        let valores: Vec<&str> = doc.data.rows.iter().filter_map(|r| r.get(col).map(|s| s.as_str())).collect();
+        let valores: Vec<&str> = doc
+            .data
+            .rows
+            .iter()
+            .filter_map(|r| r.get(col).map(|s| s.as_str()))
+            .collect();
         let total = valores.len();
-        let preenchidos: Vec<&str> = valores.iter().copied().filter(|v| !v.trim().is_empty()).collect();
+        let preenchidos: Vec<&str> = valores
+            .iter()
+            .copied()
+            .filter(|v| !v.trim().is_empty())
+            .collect();
         let vazios = total - preenchidos.len();
         let distintos = preenchidos.iter().collect::<HashSet<_>>().len();
-        let nums: Vec<f64> = preenchidos.iter().filter_map(|v| v.trim().parse::<f64>().ok()).collect();
+        let nums: Vec<f64> = preenchidos
+            .iter()
+            .filter_map(|v| v.trim().parse::<f64>().ok())
+            .collect();
         let numerica = !preenchidos.is_empty() && nums.len() == preenchidos.len();
         let mut linhas: Vec<(&str, String)> = vec![
             ("Registos mostrados", total.to_string()),
@@ -51,7 +65,8 @@ impl AccessApp {
             linhas.push(("Média", numero(soma / nums.len() as f64)));
             linhas.push(("Mínimo", numero(min)));
             linhas.push(("Máximo", numero(max)));
-        } else if let (Some(min), Some(max)) = (preenchidos.iter().min(), preenchidos.iter().max()) {
+        } else if let (Some(min), Some(max)) = (preenchidos.iter().min(), preenchidos.iter().max())
+        {
             linhas.push(("Primeiro (A-Z)", min.to_string()));
             linhas.push(("Último (A-Z)", max.to_string()));
         }
@@ -63,15 +78,19 @@ impl AccessApp {
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.label(RichText::new(format!("Coluna «{}»", nome)).strong());
-                ui.weak("Conta só os registos que estão a ser mostrados (com os filtros aplicados).");
+                ui.weak(
+                    "Conta só os registos que estão a ser mostrados (com os filtros aplicados).",
+                );
                 ui.add_space(6.0);
-                egui::Grid::new("totais_grid").spacing([24.0, 5.0]).show(ui, |ui| {
-                    for (k, v) in &linhas {
-                        ui.label(*k);
-                        ui.label(RichText::new(v.clone()).strong());
-                        ui.end_row();
-                    }
-                });
+                egui::Grid::new("totais_grid")
+                    .spacing([24.0, 5.0])
+                    .show(ui, |ui| {
+                        for (k, v) in &linhas {
+                            ui.label(*k);
+                            ui.label(RichText::new(v.clone()).strong());
+                            ui.end_row();
+                        }
+                    });
             });
         if !aberto {
             self.totais_aberto = false;

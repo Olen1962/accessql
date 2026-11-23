@@ -6,7 +6,12 @@
 
 /// Valida `valor` para um campo com o tipo declarado `tipo`.
 /// `nome` só entra nas mensagens de erro.
-pub(crate) fn validar(tipo: &str, obrigatorio: bool, valor: &str, nome: &str) -> Result<(), String> {
+pub(crate) fn validar(
+    tipo: &str,
+    obrigatorio: bool,
+    valor: &str,
+    nome: &str,
+) -> Result<(), String> {
     let erro = |m: String| format!("Campo «{}»: {}", nome, m);
     let v = valor.trim();
     if v.is_empty() {
@@ -29,8 +34,22 @@ pub(crate) fn validar(tipo: &str, obrigatorio: bool, valor: &str, nome: &str) ->
         "BOOLEAN" | "BOOL" | "YESNO" => {
             let b = v.to_lowercase();
             let aceites = [
-                "0", "1", "s", "n", "sim", "não", "nao", "y", "yes", "no", "t", "true", "f", "false",
-                "verdadeiro", "falso",
+                "0",
+                "1",
+                "s",
+                "n",
+                "sim",
+                "não",
+                "nao",
+                "y",
+                "yes",
+                "no",
+                "t",
+                "true",
+                "f",
+                "false",
+                "verdadeiro",
+                "falso",
             ];
             if aceites.contains(&b.as_str()) {
                 Ok(())
@@ -38,9 +57,12 @@ pub(crate) fn validar(tipo: &str, obrigatorio: bool, valor: &str, nome: &str) ->
                 Err(erro(format!("«{}» não é um valor Sim/Não válido", valor)))
             }
         }
-        "DATE" => data(v)
-            .map(|_| ())
-            .ok_or_else(|| erro(format!("«{}» não é uma data válida (AAAA-MM-DD ou DD/MM/AAAA)", valor))),
+        "DATE" => data(v).map(|_| ()).ok_or_else(|| {
+            erro(format!(
+                "«{}» não é uma data válida (AAAA-MM-DD ou DD/MM/AAAA)",
+                valor
+            ))
+        }),
         "DATETIME" | "TIMESTAMP" => data_hora(v)
             .map(|_| ())
             .ok_or_else(|| erro(format!("«{}» não é uma data/hora válida", valor))),
@@ -63,9 +85,17 @@ fn data(s: &str) -> Option<(i32, u32, u32)> {
         return None;
     }
     let (a, m, d) = if sep == '-' {
-        (p[0].parse::<i32>().ok()?, p[1].parse::<u32>().ok()?, p[2].parse::<u32>().ok()?)
+        (
+            p[0].parse::<i32>().ok()?,
+            p[1].parse::<u32>().ok()?,
+            p[2].parse::<u32>().ok()?,
+        )
     } else {
-        (p[2].parse::<i32>().ok()?, p[1].parse::<u32>().ok()?, p[0].parse::<u32>().ok()?)
+        (
+            p[2].parse::<i32>().ok()?,
+            p[1].parse::<u32>().ok()?,
+            p[0].parse::<u32>().ok()?,
+        )
     };
     if a < 1 || !(1..=12).contains(&m) || d < 1 || d > dias_do_mes(a, m) {
         return None;
@@ -137,7 +167,11 @@ mod testes {
     #[test]
     fn sim_nao() {
         for v in ["0", "1", "sim", "NÃO", "true", "falso", "y"] {
-            assert!(validar("BOOLEAN", false, v, "Ativo").is_ok(), "valor: {}", v);
+            assert!(
+                validar("BOOLEAN", false, v, "Ativo").is_ok(),
+                "valor: {}",
+                v
+            );
         }
         assert!(validar("BOOLEAN", false, "talvez", "Ativo").is_err());
     }

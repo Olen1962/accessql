@@ -14,9 +14,17 @@ fn ficheiro() -> Option<PathBuf> {
 }
 
 pub(crate) fn carregar() -> Vec<PathBuf> {
-    let Some(f) = ficheiro() else { return Vec::new() };
+    let Some(f) = ficheiro() else {
+        return Vec::new();
+    };
     std::fs::read_to_string(f)
-        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).map(PathBuf::from).take(MAX).collect())
+        .map(|s| {
+            s.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(PathBuf::from)
+                .take(MAX)
+                .collect()
+        })
         .unwrap_or_default()
 }
 

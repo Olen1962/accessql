@@ -1,5 +1,7 @@
-use eframe::egui::{self, Align2, Color32, FontId, Frame, Margin, Pos2, Response, RichText, Sense, Stroke, Ui, Vec2};
 use crate::{estado::*, icones::*, tema::*, widgets::*};
+use eframe::egui::{
+    self, Align2, Color32, FontId, Frame, Margin, Pos2, Response, RichText, Sense, Stroke, Ui, Vec2,
+};
 
 fn tamanho_legivel(b: u64) -> String {
     if b < 1024 {
@@ -12,16 +14,23 @@ fn tamanho_legivel(b: u64) -> String {
 }
 
 impl AccessApp {
-// ───────────── Backstage (separador Ficheiro) ─────────────
+    // ───────────── Backstage (separador Ficheiro) ─────────────
     pub(crate) fn bs_item(ui: &mut Ui, text: &str, selected: bool) -> Response {
-        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 29.0), Sense::click());
+        let (rect, resp) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 29.0), Sense::click());
         let p = ui.painter();
         if selected {
             p.rect_filled(rect, 0.0, rgb(0xFFE08A));
         } else if resp.hovered() {
             p.rect_filled(rect, 0.0, rgb(0xE3ECF8));
         }
-        p.text(Pos2::new(rect.left() + 22.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(13.5), TEXT);
+        p.text(
+            Pos2::new(rect.left() + 22.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            text,
+            FontId::proportional(13.5),
+            TEXT,
+        );
         resp
     }
 
@@ -45,10 +54,19 @@ impl AccessApp {
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
                 ui.add_space(8.0);
-                let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::click());
+                let (r, resp) =
+                    ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::click());
                 let c = Pos2::new(r.left() + 32.0, r.center().y);
                 let p = ui.painter();
-                p.circle_filled(c, 13.0, if resp.hovered() { rgb(0x7FA6DE) } else { rgb(0x5B8BC9) });
+                p.circle_filled(
+                    c,
+                    13.0,
+                    if resp.hovered() {
+                        rgb(0x7FA6DE)
+                    } else {
+                        rgb(0x5B8BC9)
+                    },
+                );
                 let w = Stroke::new(2.0_f32, Color32::WHITE);
                 p.line_segment([c + Vec2::new(6.0, 0.0), c + Vec2::new(-6.0, 0.0)], w);
                 p.line_segment([c + Vec2::new(-6.0, 0.0), c + Vec2::new(-1.0, -5.0)], w);
@@ -64,7 +82,10 @@ impl AccessApp {
                 }
                 ui.add_space(4.0);
                 let y = ui.cursor().top();
-                ui.painter().line_segment([Pos2::new(14.0, y), Pos2::new(200.0, y)], Stroke::new(1.0_f32, RIBBON_LINE));
+                ui.painter().line_segment(
+                    [Pos2::new(14.0, y), Pos2::new(200.0, y)],
+                    Stroke::new(1.0_f32, RIBBON_LINE),
+                );
                 ui.add_space(4.0);
                 for (i, pg) in PAGES.iter().enumerate() {
                     if Self::bs_item(ui, pg, self.bs_page == i).clicked() {
@@ -73,13 +94,19 @@ impl AccessApp {
                 }
                 ui.add_space(4.0);
                 let y = ui.cursor().top();
-                ui.painter().line_segment([Pos2::new(14.0, y), Pos2::new(200.0, y)], Stroke::new(1.0_f32, RIBBON_LINE));
+                ui.painter().line_segment(
+                    [Pos2::new(14.0, y), Pos2::new(200.0, y)],
+                    Stroke::new(1.0_f32, RIBBON_LINE),
+                );
                 ui.add_space(4.0);
                 if Self::bs_item(ui, "Sair", false).clicked() {
                     self.bs_action(ctx, "Sair");
                 }
                 let full = ui.max_rect();
-                ui.painter().line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0_f32, RIBBON_LINE));
+                ui.painter().line_segment(
+                    [full.right_top(), full.right_bottom()],
+                    Stroke::new(1.0_f32, RIBBON_LINE),
+                );
             });
         egui::CentralPanel::default().frame(Frame::none().fill(Color32::WHITE).inner_margin(Margin::same(28.0))).show(ctx, |ui| {
             match self.bs_page {
