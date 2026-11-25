@@ -26,14 +26,23 @@ impl AccessApp {
 
     pub(crate) fn pedir_eliminar_objeto(&mut self, kind: ObjKind, nome: String) {
         let Some(db) = self.db.as_ref() else { return };
-        let mut e = EliminarObj { kind, nome: nome.clone(), registos: None, bloqueio: None, afetadas: Vec::new() };
+        let mut e = EliminarObj {
+            kind,
+            nome: nome.clone(),
+            registos: None,
+            bloqueio: None,
+            afetadas: Vec::new(),
+        };
         if kind == ObjKind::Table {
             e.registos = db.contar_registos(&nome).ok();
             if let Ok(rels) = db.lista_relacoes() {
                 // tabelas que guardam uma chave estrangeira para esta (uma tabela que se refere a si própria não conta)
                 let mut filhas: Vec<String> = Vec::new();
                 let mut detalhes: Vec<String> = Vec::new();
-                for r in rels.iter().filter(|r| r.ref_tabela.eq_ignore_ascii_case(&nome) && !r.tabela.eq_ignore_ascii_case(&nome)) {
+                for r in rels.iter().filter(|r| {
+                    r.ref_tabela.eq_ignore_ascii_case(&nome)
+                        && !r.tabela.eq_ignore_ascii_case(&nome)
+                }) {
                     let d = format!("«{}» (campo {})", r.tabela, r.colunas);
                     if !detalhes.contains(&d) {
                         detalhes.push(d);
@@ -43,7 +52,11 @@ impl AccessApp {
                     }
                 }
                 if !detalhes.is_empty() {
-                    let quais = filhas.iter().map(|t| format!("«{}»", t)).collect::<Vec<_>>().join(", ");
+                    let quais = filhas
+                        .iter()
+                        .map(|t| format!("«{}»", t))
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     e.bloqueio = Some(format!(
                         "A tabela «{}» tem relações: é referida por {}.\n\nPara a eliminar, elimine primeiro {}, que guarda{} a relação.",
                         nome,
@@ -59,8 +72,14 @@ impl AccessApp {
     }
 
     pub(crate) fn dialogo_eliminar_obj(&mut self, ctx: &egui::Context) {
-        let Some(e) = self.eliminar_obj.take() else { return };
-        let tipo = if e.kind == ObjKind::Table { "tabela" } else { "consulta" };
+        let Some(e) = self.eliminar_obj.take() else {
+            return;
+        };
+        let tipo = if e.kind == ObjKind::Table {
+            "tabela"
+        } else {
+            "consulta"
+        };
         let mut acao: Option<bool> = None;
         egui::Window::new(format!("Eliminar {}", tipo))
             .collapsible(false)
@@ -113,7 +132,10 @@ impl AccessApp {
     }
 
     fn eliminar_objeto_agora(&mut self, kind: ObjKind, nome: &str) {
-        let r = self.db.as_ref().map(|db| db.eliminar_objeto(kind == ObjKind::Table, nome));
+        let r = self
+            .db
+            .as_ref()
+            .map(|db| db.eliminar_objeto(kind == ObjKind::Table, nome));
         match r {
             Some(Ok(())) => {
                 // fecha os separadores do objeto, seja qual for o modo em que estejam
@@ -128,13 +150,21 @@ impl AccessApp {
                 self.edit = None;
                 self.row_sel = false;
                 self.confirm_del = None;
-                if self.indices.as_ref().map_or(false, |e| e.tabela.eq_ignore_ascii_case(nome)) {
+                if self
+                    .indices
+                    .as_ref()
+                    .map_or(false, |e| e.tabela.eq_ignore_ascii_case(nome))
+                {
                     self.indices = None;
                 }
                 self.relacoes = None;
                 self.limpar_historico();
                 self.refresh_nav();
-                self.msg = format!("«{}» eliminad{}", nome, if kind == ObjKind::Table { "o" } else { "a" });
+                self.msg = format!(
+                    "«{}» eliminad{}",
+                    nome,
+                    if kind == ObjKind::Table { "o" } else { "a" }
+                );
             }
             Some(Err(e)) => self.msg = e,
             None => {}

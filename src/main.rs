@@ -6,6 +6,7 @@ mod ficheiro;
 mod consulta;
 mod estrutura;
 mod renomear;
+mod duplicar_obj;
 mod filtros;
 mod csvio;
 mod desfazer;
@@ -22,6 +23,9 @@ mod area_trabalho;
 mod status;
 mod backstage;
 mod app;
+mod destak;
+mod qbe;
+mod sql_parser;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {

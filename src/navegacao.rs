@@ -1,13 +1,16 @@
 use eframe::egui::{self, Align2, Color32, FontId, Frame, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use crate::{estado::*, icones::*, tema::*};
+
 impl AccessApp {
-// ───────────── Painel de navegação ─────────────
     pub(crate) fn nav_pane(&mut self, ctx: &egui::Context) {
         let mut to_open: Option<(ObjKind, String)> = None;
         let mut to_sql: Option<String> = None;
         let mut to_estr: Option<String> = None;
         let mut to_ren: Option<(ObjKind, String)> = None;
+        let mut to_dup: Option<(ObjKind, String)> = None;
         let mut to_del: Option<(ObjKind, String)> = None;
+        let mut to_qbe: Option<String> = None;
+
         let nav_resp = egui::SidePanel::left("nav")
             .resizable(true)
             .default_width(230.0)
@@ -41,17 +44,11 @@ impl AccessApp {
                             tri(&p, [Pos2::new(c.x - 2.0, c.y - 4.0), Pos2::new(c.x - 2.0, c.y + 4.0), Pos2::new(c.x + 3.0, c.y)], Color32::WHITE);
                         }
                         p.text(Pos2::new(hr.left() + 24.0, hr.center().y), Align2::LEFT_CENTER, gname, FontId::proportional(13.0), Color32::WHITE);
-                        if hresp.clicked() {
-                            self.nav_open[gi] = !self.nav_open[gi];
-                        }
-                        if !self.nav_open[gi] {
-                            continue;
-                        }
+                        if hresp.clicked() { self.nav_open[gi] = !self.nav_open[gi]; }
+                        if !self.nav_open[gi] { continue; }
                         for (ii, name) in items.iter().enumerate() {
                             let f = self.nav_filter.to_lowercase();
-                            if !f.is_empty() && !name.to_lowercase().contains(&f) {
-                                continue;
-                            }
+                            if !f.is_empty() && !name.to_lowercase().contains(&f) { continue; }
                             let (rr, rresp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 21.0), Sense::click());
                             let p = ui.painter().clone();
                             if self.nav_sel == Some((gi, ii)) {
@@ -62,33 +59,16 @@ impl AccessApp {
                             }
                             draw_icon(&p, Rect::from_center_size(Pos2::new(rr.left() + 18.0, rr.center().y), Vec2::splat(16.0)), kind.icon());
                             p.text(Pos2::new(rr.left() + 32.0, rr.center().y), Align2::LEFT_CENTER, name, FontId::proportional(13.0), Color32::BLACK);
-                            if rresp.clicked() {
-                                self.nav_sel = Some((gi, ii));
-                            }
-                            if rresp.double_clicked() {
-                                to_open = Some((kind, name.to_string()));
-                            }
+                            if rresp.clicked() { self.nav_sel = Some((gi, ii)); }
+                            if rresp.double_clicked() { to_open = Some((kind, name.to_string())); }
                             rresp.context_menu(|ui| {
-                                if ui.button("Abrir").clicked() {
-                                    to_open = Some((kind, name.to_string()));
-                                    ui.close_menu();
-                                }
-                                if ui.button("Mudar o Nome (F2)").clicked() {
-                                    to_ren = Some((kind, name.to_string()));
-                                    ui.close_menu();
-                                }
-                                if ui.button("Eliminar (Delete)").clicked() {
-                                    to_del = Some((kind, name.to_string()));
-                                    ui.close_menu();
-                                }
-                                if kind == ObjKind::Table && ui.button("Vista Estrutura").clicked() {
-                                    to_estr = Some(name.to_string());
-                                    ui.close_menu();
-                                }
-                                if kind == ObjKind::Query && ui.button("Vista SQL").clicked() {
-                                    to_sql = Some(name.to_string());
-                                    ui.close_menu();
-                                }
+                                if ui.button("Abrir").clicked() { to_open = Some((kind, name.to_string())); ui.close_menu(); }
+                                if ui.button("Mudar o Nome (F2)").clicked() { to_ren = Some((kind, name.to_string())); ui.close_menu(); }
+                                if ui.button("Duplicar (Ctrl+D)").clicked() { to_dup = Some((kind, name.to_string())); ui.close_menu(); }
+                                if ui.button("Eliminar (Delete)").clicked() { to_del = Some((kind, name.to_string())); ui.close_menu(); }
+                                if kind == ObjKind::Table && ui.button("Vista Estrutura").clicked() { to_estr = Some(name.to_string()); ui.close_menu(); }
+                                if kind == ObjKind::Query && ui.button("Vista SQL").clicked() { to_sql = Some(name.to_string()); ui.close_menu(); }
+                                if kind == ObjKind::Query && ui.button("Vista Estrutura (QBE)").clicked() { to_qbe = Some(name.to_string()); ui.close_menu(); }
                             });
                         }
                     }
@@ -97,23 +77,13 @@ impl AccessApp {
                 ui.painter().line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0_f32, RIBBON_LINE));
             });
         self.nav_rect = Some(nav_resp.response.rect);
-        if let Some((k, n)) = to_open {
-            self.open_doc(k, n);
-            self.foco_nav = false;
-        }
-        if let Some(n) = to_sql {
-            self.abrir_vista_sql(&n);
-            self.foco_nav = false;
-        }
-        if let Some(n) = to_estr {
-            self.abrir_estrutura(&n);
-            self.foco_nav = false;
-        }
-        if let Some((k, n)) = to_ren {
-            self.renomear_obj = Some((k, n.clone(), n));
-        }
-        if let Some((k, n)) = to_del {
-            self.pedir_eliminar_objeto(k, n);
-        }
+
+        if let Some((k, n)) = to_open { self.open_doc(k, n); self.foco_nav = false; }
+        if let Some(n) = to_sql { self.abrir_vista_sql(&n); self.foco_nav = false; }
+        if let Some(n) = to_estr { self.abrir_estrutura(&n); self.foco_nav = false; }
+        if let Some(n) = to_qbe { self.abrir_qbe(Some(n)); self.foco_nav = false; }
+        if let Some((k, n)) = to_ren { self.renomear_obj = Some((k, n.clone(), n)); }
+        if let Some((k, n)) = to_dup { self.pedir_duplicar_objeto(k, &n); }
+        if let Some((k, n)) = to_del { self.pedir_eliminar_objeto(k, n); }
     }
 }
